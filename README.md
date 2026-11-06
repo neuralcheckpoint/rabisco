@@ -4,6 +4,16 @@ Anote por cima de qualquer coisa na tela do Windows: um vídeo, um programa, uma
 
 ![Anotações por cima de um programa](imagens/exemplo.png)
 
+## ⬇️ Baixar
+
+### [**Baixar rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/rabisco.exe)
+
+É um arquivo só, de ~190 KB, e não precisa instalar: baixe e dê dois cliques. Funciona no Windows 10 e 11.
+
+> **O Windows pode mostrar "O Windows protegeu o computador".** Isso aparece com qualquer programa novo que não tem assinatura digital paga. Clique em **Mais informações → Executar assim mesmo**. Se preferir, você pode compilar a partir do código (veja [Compilar](#compilar)).
+
+Versões anteriores e notas de cada versão: [Releases](https://github.com/neuralcheckpoint/rabisco/releases).
+
 - **Leve:** um `.exe` de ~190 KB, sem instalador. Parado, ocupa ~2 MB de RAM.
 - **Caneta de verdade:** usa a pressão da mesa digitalizadora, e a ponta de trás da caneta funciona como borracha.
 - **Fora do caminho:** no modo mouse, o clique passa direto para o programa de baixo, e os desenhos continuam na tela.
@@ -13,7 +23,7 @@ Feito em Rust puro com a API do Windows (`windows-sys`), sem framework de interf
 
 ## Como usar
 
-Abra o `rabisco.exe`. A barra aparece na esquerda da tela.
+Abra o `rabisco.exe`. A barra aparece na esquerda da tela. Para abrir junto com o Windows, coloque um atalho dele em `shell:startup` (digite isso no Executar, `Win+R`).
 
 <img src="imagens/barra.png" alt="Barra de ferramentas" width="120" align="right">
 
