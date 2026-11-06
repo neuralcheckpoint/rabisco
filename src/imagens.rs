@@ -140,3 +140,29 @@ fn imagens() {
     paste(&mut img, w, &bar, l.w, l.h, 24, (h - l.h) / 2);
     png("imagens/exemplo.png", w, h, &img);
 }
+
+/// Prévia do ícone em `target/icone.png`: 16, 32 e 64 px, e o 16 ampliado 8x.
+#[test]
+#[ignore]
+fn icone() {
+    let (w, h) = (16 * 8 + 16 + 64 + 32 + 16 + 40, 140);
+    let mut img = vec![0xFF5A_5A5Au32; (w * h) as usize];
+    let mut x = 8;
+    for n in [16, 32, 64] {
+        let px = toolbar::app_icon(n);
+        for (i, &p) in px.iter().enumerate() {
+            let (ix, iy) = (x + i as i32 % n, 8 + i as i32 / n);
+            let d = &mut img[(iy * w + ix) as usize];
+            *d = over(p, *d);
+        }
+        x += n + 8;
+    }
+    let px = toolbar::app_icon(16);
+    for y in 0..128 {
+        for xx in 0..128 {
+            let d = &mut img[((y + 8) * w + x + xx) as usize];
+            *d = over(px[((y / 8) * 16 + xx / 8) as usize], *d);
+        }
+    }
+    png("target/icone.png", w, h, &img);
+}

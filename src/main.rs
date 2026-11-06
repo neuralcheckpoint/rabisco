@@ -7,7 +7,9 @@
 //! mostrando o que já recebeu. Para mudar algo depois, a DIB é refeita a partir
 //! dos traços (vetores).
 
+mod bandeja;
 mod canvas;
+mod instalar;
 mod toolbar;
 #[cfg(test)]
 mod imagens;
@@ -23,12 +25,25 @@ use windows_sys::Win32::UI::Controls::*;
 use windows_sys::Win32::UI::HiDpi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Input::Pointer::*;
+use windows_sys::Win32::UI::Shell::{NIN_SELECT, NINF_KEY};
+use windows_sys::core::BOOL;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const HK_DRAW: i32 = 1;
 const HK_HIDE: i32 = 2;
 const HK_CLEAR: i32 = 3;
 const HK_QUIT: i32 = 4;
+
+/// Outra cópia foi aberta (atalho do Iniciar): mostra a barra desta.
+const WM_SHOW_BAR: u32 = WM_APP + 2;
+const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
+
+const MENU_BAR: u32 = 1;
+const MENU_DRAW: u32 = 2;
+const MENU_HIDE: u32 = 3;
+const MENU_CLEAR: u32 = 4;
+const MENU_AUTOSTART: u32 = 5;
+const MENU_QUIT: u32 = 6;
 
 const TIP_TIMER: usize = 1;
 /// Parado no modo desenho por este tempo: solta a imagem da tela.
@@ -138,6 +153,8 @@ struct Bar {
     tip: HWND,
     tip_text: Vec<u16>,
     tip_shown: bool,
+    /// Falso = guardada na bandeja.
+    shown: bool,
 }
 
 struct App {
@@ -165,6 +182,9 @@ struct App {
     samples: Vec<Sample>,
     scratch: Vec<(canvas::Pt, canvas::Pt)>,
     bar: Bar,
+    tray_icon: HICON,
+    /// `TaskbarCreated`: o Explorer reiniciou e o ícone da bandeja sumiu.
+    taskbar_created: u32,
 }
 
 static mut APP: *mut App = null_mut();
@@ -753,9 +773,7 @@ impl App {
         self.hide_tip();
         match item {
             Item::Grip => {}
-            Item::Close => unsafe {
-                DestroyWindow(self.hwnd);
-            },
+            Item::Close => self.set_bar(false),
             Item::Mouse => self.set_draw(false),
             Item::Tool(t) => self.set_tool(t),
             Item::Color(i) => self.set_color(COLORS[i]),
@@ -764,6 +782,52 @@ impl App {
             Item::Redo => self.undo(true),
             Item::Clear => self.clear_all(),
             Item::Hide => self.set_hidden(!self.hidden),
+        }
+    }
+
+    /// Mostra a barra ou guarda na bandeja (sai do modo desenho junto).
+    fn set_bar(&mut self, show: bool) {
+        if !show && self.draw {
+            self.set_draw(false);
+        }
+        self.hide_tip();
+        self.bar.hover = None;
+        self.bar.shown = show;
+        unsafe { ShowWindow(self.bar.hwnd, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+        self.paint_bar();
+    }
+
+    fn tray(&mut self, event: u32) {
+        match event {
+            NIN_SELECT | NIN_KEYSELECT => self.set_bar(!self.bar.shown),
+            WM_CONTEXTMENU => {
+                use bandeja::Entry::{Item as It, Sep};
+                let auto = instalar::autostart();
+                let id = bandeja::menu(self.hwnd, &[
+                    It { id: MENU_BAR, text: if self.bar.shown { "Guardar a barra na bandeja" } else { "Mostrar a barra" }, checked: false },
+                    It { id: MENU_DRAW, text: "Desenhar\tCtrl+Shift+D", checked: self.draw },
+                    It { id: MENU_HIDE, text: "Esconder desenhos\tCtrl+Shift+H", checked: self.hidden },
+                    It { id: MENU_CLEAR, text: "Apagar tudo\tCtrl+Shift+X", checked: false },
+                    Sep,
+                    It { id: MENU_AUTOSTART, text: "Abrir com o Windows", checked: auto },
+                    Sep,
+                    It { id: MENU_QUIT, text: "Sair\tCtrl+Shift+Q", checked: false },
+                ]);
+                match id {
+                    MENU_BAR => self.set_bar(!self.bar.shown),
+                    MENU_DRAW => self.set_draw(!self.draw),
+                    MENU_HIDE => self.set_hidden(!self.hidden),
+                    MENU_CLEAR => self.clear_all(),
+                    MENU_AUTOSTART => {
+                        instalar::set_autostart(!auto);
+                    }
+                    MENU_QUIT => unsafe {
+                        DestroyWindow(self.hwnd);
+                    },
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
 
@@ -854,6 +918,11 @@ unsafe fn make_cursor(diam: f32, rgb: u32, cross: bool) -> HCURSOR {
             }
         }
     }
+    unsafe { argb_icon(&px, s, Some((s / 2) as u32)) }
+}
+
+/// Ícone (`hot` = None) ou cursor a partir de pixels ARGB `s`x`s`.
+unsafe fn argb_icon(px: &[u32], s: i32, hot: Option<u32>) -> HICON {
     unsafe {
         let mut bmi: BITMAPINFO = core::mem::zeroed();
         bmi.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
@@ -866,7 +935,8 @@ unsafe fn make_cursor(diam: f32, rgb: u32, cross: bool) -> HCURSOR {
         let color = CreateDIBSection(null_mut(), &bmi, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
         core::ptr::copy_nonoverlapping(px.as_ptr(), bits as *mut u32, px.len());
         let mask = CreateBitmap(s, s, 1, 1, null());
-        let info = ICONINFO { fIcon: 0, xHotspot: (s / 2) as u32, yHotspot: (s / 2) as u32, hbmMask: mask, hbmColor: color };
+        let h = hot.unwrap_or(0);
+        let info = ICONINFO { fIcon: hot.is_none() as BOOL, xHotspot: h, yHotspot: h, hbmMask: mask, hbmColor: color };
         let cur = CreateIconIndirect(&info);
         DeleteObject(color);
         DeleteObject(mask);
@@ -919,7 +989,20 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
                 a.display_changed();
                 0
             }
+            bandeja::WM_TRAY => {
+                a.tray(lp as u32 & 0xFFFF);
+                0
+            }
+            WM_SHOW_BAR => {
+                a.set_bar(true);
+                0
+            }
+            m if m == a.taskbar_created && m != 0 => {
+                bandeja::add(hwnd, a.tray_icon);
+                0
+            }
             WM_DESTROY => {
+                bandeja::remove(hwnd);
                 PostQuitMessage(0);
                 0
             }
@@ -1000,11 +1083,26 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let flag = |f: &str| args.iter().any(|a| a == f);
+    if flag("--desinstalar") {
+        return instalar::uninstall();
+    }
+    if instalar::is_installer(&args) {
+        return instalar::install();
+    }
+    // `--bandeja`: começa só com o ícone (é assim que o Windows abre).
+    let start_hidden = flag("--bandeja");
     unsafe {
-        // Uma instância só.
+        // Uma instância só. A segunda mostra a barra da primeira e sai.
         let name = wide("Local\\RabiscoOverlay");
         CreateMutexW(null(), 1, name.as_ptr());
         if GetLastError() == ERROR_ALREADY_EXISTS {
+            let class = wide("RabiscoOverlay");
+            let other = FindWindowW(class.as_ptr(), null());
+            if !other.is_null() && !start_hidden {
+                PostMessageW(other, WM_SHOW_BAR, 0, 0);
+            }
             return;
         }
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -1108,7 +1206,14 @@ fn main() {
                 tip,
                 tip_text: wide(""),
                 tip_shown: false,
+                shown: !start_hidden,
             },
+            tray_icon: {
+                let n = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
+                let px: Vec<u32> = toolbar::app_icon(n).into_iter().map(instalar::unpremul).collect();
+                argb_icon(&px, n, None)
+            },
+            taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
         });
         APP = Box::into_raw(boxed);
         let a = app();
@@ -1118,7 +1223,13 @@ fn main() {
         SendMessageW(tip, TTM_SETMAXTIPWIDTH, 0, 320);
         a.refresh_cursor();
         a.layout_bar();
-        ShowWindow(bar_hwnd, SW_SHOWNOACTIVATE);
+        if !start_hidden {
+            ShowWindow(bar_hwnd, SW_SHOWNOACTIVATE);
+        }
+        bandeja::add(hwnd, a.tray_icon);
+        if flag("--boas-vindas") {
+            bandeja::balloon(hwnd, "Rabisco instalado", "Ele abre com o Windows e fica aqui na bandeja. Clique no ícone para mostrar ou guardar a barra.");
+        }
 
         let mods = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
         let mut failed = Vec::new();

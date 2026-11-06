@@ -108,7 +108,7 @@ pub fn hit(l: &Layout, x: i32, y: i32) -> Option<Item> {
 pub fn label(item: Item) -> String {
     match item {
         Item::Grip => "Arraste para mover".into(),
-        Item::Close => "Fechar o Rabisco (Ctrl+Shift+Q)".into(),
+        Item::Close => "Guardar na bandeja · sair pelo ícone da bandeja (Ctrl+Shift+Q)".into(),
         Item::Mouse => "Mouse: clicar nos programas (Esc)".into(),
         Item::Tool(t) => match t {
             Tool::Pen => "Caneta (P)",
@@ -248,6 +248,30 @@ pub fn paint(l: &Layout, st: &State, buf: &mut [u32]) {
         };
         icon(&mut p, item, cx, cy, s, if enabled { FG } else { DIM }, st);
     }
+}
+
+/// Ícone do programa (bandeja, atalho), `n`x`n`, BGRA pré-multiplicado:
+/// quadrado escuro com a caneta da barra e um rabisco vermelho.
+pub fn app_icon(n: i32) -> Vec<u32> {
+    let mut buf = vec![0u32; (n * n) as usize];
+    let s = n as f32 / 24.0;
+    let mut p = Painter { buf: &mut buf, mask: vec![0; (n * n) as usize], dirty: Rect::EMPTY, w: n, h: n };
+    p.round_rect(Rect { x0: 0, y0: 0, x1: n, y1: n }, 5.0 * s, PANEL, 255, None);
+    // Traço mais grosso que na barra para ler em 16 px.
+    let r = if n <= 24 { 1.6 } else { 1.3 };
+    let m = |u: f32, v: f32| -> Pt { [u * s, v * s, r * s] };
+    let pen = [(15.5, 3.5), (20.5, 8.5), (10.0, 19.0), (5.0, 19.0), (5.0, 14.0)];
+    for i in 0..pen.len() {
+        let (a, b) = (pen[i], pen[(i + 1) % pen.len()]);
+        p.seg(m(a.0, a.1), m(b.0, b.1));
+    }
+    p.ink(FG);
+    let wave = [(3.5, 21.5), (8.0, 20.5), (12.5, 21.5), (17.0, 20.5), (20.5, 21.0)];
+    for w in wave.windows(2) {
+        p.seg(m(w[0].0, w[0].1), m(w[1].0, w[1].1));
+    }
+    p.ink(0xE53935);
+    buf
 }
 
 /// Desenha o ícone de `item` centrado em (cx, cy), num quadrado de 24 unidades.
