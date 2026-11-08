@@ -49,6 +49,8 @@ const HK_SAVE: i32 = 5;
 const HK_REC: i32 = 6;
 /// Esc durante a escolha da janela ou da região (só existe nesse meio tempo).
 const HK_PICK_ESC: i32 = 7;
+const HK_PRINT_REG: i32 = 8;
+const HK_BAR: i32 = 9;
 
 /// Outra cópia foi aberta (atalho do Iniciar): mostra a barra desta.
 const WM_SHOW_BAR: u32 = WM_APP + 2;
@@ -75,6 +77,8 @@ const MENU_REC_REG: u32 = 10;
 const MENU_REC_SYS: u32 = 11;
 const MENU_REC_MIC: u32 = 12;
 const MENU_REC_STOP: u32 = 13;
+const MENU_BAR_FADE: u32 = 14;
+const MENU_PRINT_REG: u32 = 15;
 
 const CF_DIB: u32 = 8;
 
@@ -93,6 +97,10 @@ const FADE_TIMER: usize = 5;
 const ZOOM_TIMER: usize = 6;
 /// Contador do tempo gravado: 1 s, só enquanto grava.
 const REC_TIMER: usize = 7;
+/// Barra transparente: confere se o mouse saiu dela (só roda com o mouse em cima).
+const BAR_TIMER: usize = 8;
+/// Opacidade da barra transparente longe do mouse (de 255).
+const BAR_FADED: u8 = 80;
 const ZOOM_MS: u32 = 20;
 
 /// Já tem um print sendo codificado: o próximo pedido espera.
@@ -162,19 +170,24 @@ impl Surface {
 
     /// Manda r para a janela. `pos` = canto na tela, ou None para não mover.
     fn present(&self, hwnd: HWND, pos: Option<(i32, i32)>, r: Option<Rect>) {
-        self.update(hwnd, pos, r, AC_SRC_ALPHA as u8);
+        self.update(hwnd, pos, r, AC_SRC_ALPHA as u8, 255);
+    }
+
+    /// Como `present`, com a janela inteira a `alpha` de 255.
+    fn present_alpha(&self, hwnd: HWND, alpha: u8) {
+        self.update(hwnd, None, None, AC_SRC_ALPHA as u8, alpha);
     }
 
     /// Como `present`, mas opaca: o alfa dos pixels é ignorado (o GDI escreve 0 nele).
     fn present_opaque(&self, hwnd: HWND, pos: Option<(i32, i32)>) {
-        self.update(hwnd, pos, None, 0);
+        self.update(hwnd, pos, None, 0, 255);
     }
 
-    fn update(&self, hwnd: HWND, pos: Option<(i32, i32)>, r: Option<Rect>, format: u8) {
+    fn update(&self, hwnd: HWND, pos: Option<(i32, i32)>, r: Option<Rect>, format: u8, alpha: u8) {
         let dst = pos.map(|(x, y)| POINT { x, y });
         let size = SIZE { cx: self.w, cy: self.h };
         let src = POINT { x: 0, y: 0 };
-        let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: format };
+        let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: format };
         let dirty = r.map(|r| RECT { left: r.x0, top: r.y0, right: r.x1, bottom: r.y1 });
         let info = UPDATELAYEREDWINDOWINFO {
             cbSize: size_of::<UPDATELAYEREDWINDOWINFO>() as u32,
@@ -211,6 +224,12 @@ struct Bar {
     tip_shown: bool,
     /// Falso = guardada na bandeja.
     shown: bool,
+    /// Modo barra transparente (fica quase invisível longe do mouse).
+    faded: bool,
+    /// Mouse em cima da barra agora.
+    near: bool,
+    /// O ● foi apertado: o menu abre ao soltar o botão.
+    rec_menu: bool,
 }
 
 /// Caixa de texto aberta (ferramenta T). O texto fica em `App::live` como traço.
@@ -312,6 +331,11 @@ struct App {
     rec_wait: HANDLE,
     /// Ponto vermelho no canto da área gravada, fora da captura.
     rec_dot: HWND,
+    /// Moldura vermelha em volta do que grava (fora do vídeo) e o que ela cerca.
+    rec_frame: [HWND; 4],
+    rec_rect: (i32, i32, i32, i32),
+    /// Gravando uma janela: ela (a moldura e o contador a seguem).
+    rec_target: HWND,
     /// Área gravada (x, y, w) e o tamanho do ponto (d, m), para o contador.
     rec_area: (i32, i32, i32, i32, i32),
     rec_t0: Option<std::time::Instant>,
@@ -1263,6 +1287,15 @@ impl App {
                 self.save_print()
             }
             HK_REC => self.toggle_record(),
+            HK_PRINT_REG => self.print_region(),
+            HK_BAR => {
+                // Guardada na bandeja: só aparece. Visível: liga/desliga a transparência.
+                if self.bar.shown {
+                    self.toggle_bar_fade();
+                } else {
+                    self.set_bar(true);
+                }
+            }
             HK_PICK_ESC => self.pick_end(None),
             HK_QUIT => unsafe {
                 DestroyWindow(self.hwnd);
@@ -1281,7 +1314,7 @@ impl App {
         }
         match (self.rec, self.rec_prefs.pick) {
             (gravar::State::Recording | gravar::State::Stopping, _) | (_, gravar::Pick::Monitor) => self.press_record(gravar::Mode::Monitor),
-            (_, p) => self.pick_start(p),
+            (_, p) => self.pick_start(p, false),
         }
     }
 
@@ -1342,28 +1375,36 @@ impl App {
     fn rec_menu(&mut self) {
         let mut v = Vec::new();
         self.rec_entries(&mut v);
-        let id = bandeja::menu(self.hwnd, &v);
+        // Dono = a barra (visível): com a janela do desenho, escondida no modo
+        // mouse, o menu não ganhava o primeiro plano e fechava na hora.
+        let id = bandeja::menu(self.bar.hwnd, &v);
         self.rec_command(id);
     }
 
-    fn pick_start(&mut self, kind: gravar::Pick) {
+    fn pick_start(&mut self, kind: gravar::Pick, print: bool) {
         let mon = cursor_monitor();
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(pick_hook), GetModuleHandleW(null()), 0) };
         if hook.is_null() {
             return self.show_toast(false);
         }
         unsafe { RegisterHotKey(self.hwnd, HK_PICK_ESC, 0, VK_ESCAPE as u32) };
-        let mut pk = Picking { kind, hook, mon, dim: null_mut(), surf: None, from: None, sel: None, target: null_mut(), frame: [null_mut(); 4] };
-        if kind == gravar::Pick::Region {
-            // A tela escurece de leve só no monitor do cursor, enquanto escolhe.
-            pk.surf = Surface::new(mon.2, mon.3);
-            if let Some(sf) = pk.surf.as_mut() {
-                sf.pixels().fill(PICK_DIM);
-                pk.dim = aux_window();
-                sf.present(pk.dim, Some((mon.0, mon.1)), None);
-                unsafe { ShowWindow(pk.dim, SW_SHOWNOACTIVATE) };
-            }
-        }
+        // A janela pode estar em qualquer tela; a região fica no monitor do cursor.
+        let area = if kind == gravar::Pick::Window { virtual_screen() } else { mon };
+        let mut pk = Picking {
+            kind,
+            hook,
+            mon,
+            area,
+            dim: core::array::from_fn(|_| solid_box(DARK_CLASS, PICK_DIM)),
+            edge: core::array::from_fn(|_| solid_box(EDGE_CLASS, 255)),
+            label: aux_window(),
+            from: None,
+            target: null_mut(),
+            print,
+        };
+        // Fora do print da região (que copia a tela logo depois de fechar a escolha).
+        unsafe { SetWindowDisplayAffinity(pk.label, WDA_EXCLUDEFROMCAPTURE) };
+        pick_show(&mut pk, None, mon);
         self.pick = Some(pk);
         let mut pt = POINT { x: 0, y: 0 };
         unsafe { GetCursorPos(&mut pt) };
@@ -1379,13 +1420,8 @@ impl App {
             (gravar::Pick::Window, 0) => {
                 let t = window_at(x, y);
                 if t != pk.target {
-                    for h in pk.frame {
-                        if !h.is_null() {
-                            unsafe { DestroyWindow(h) };
-                        }
-                    }
                     pk.target = t;
-                    pk.frame = frame_windows(t);
+                    pick_show(pk, window_bounds(t), monitor_at(x, y));
                 }
             }
             (gravar::Pick::Window, 2) if !pk.target.is_null() => done = Some(gravar::Mode::Window(pk.target as isize)),
@@ -1395,7 +1431,7 @@ impl App {
                 // Dentro do monitor do começo, em coordenadas dele.
                 let c = |v: (i32, i32)| ((v.0 - mon.0).clamp(0, mon.2), (v.1 - mon.1).clamp(0, mon.3));
                 let sel = gravar::drag_rect(c(a), c((x, y)));
-                pick_region_paint(pk, sel);
+                pick_show(pk, Some((mon.0 + sel.0, mon.1 + sel.1, sel.2, sel.3)), mon);
                 if ev == 2 {
                     pk.from = None;
                     if sel.2 >= 16 && sel.3 >= 16 {
@@ -1416,16 +1452,26 @@ impl App {
         unsafe {
             UnhookWindowsHookEx(pk.hook);
             UnregisterHotKey(self.hwnd, HK_PICK_ESC);
-            for h in pk.frame.into_iter().chain([pk.dim]) {
+            for h in pk.dim.into_iter().chain(pk.edge).chain([pk.label]) {
                 if !h.is_null() {
                     DestroyWindow(h);
                 }
             }
         }
-        drop(pk.surf);
-        if let Some(m) = mode {
-            self.press_record(m);
+        match mode {
+            Some(gravar::Mode::Region(x, y, w, h)) if pk.print => self.save_print_area(x, y, w, h),
+            Some(m) => self.press_record(m),
+            None => {}
         }
+    }
+
+    /// Ctrl+Shift+A: arrasta um retângulo e salva o print só dele (a mesma escolha
+    /// da gravação de região). De novo durante a escolha, cancela.
+    fn print_region(&mut self) {
+        if self.pick.is_some() {
+            return self.pick_end(None);
+        }
+        self.pick_start(gravar::Pick::Region, true);
     }
 
     /// A gravação roda em outro processo (`rabisco.exe --gravar`): D3D11, WGC e
@@ -1444,6 +1490,7 @@ impl App {
         let file = gravar::file_name(t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
         let Some((fin, part)) = gravar::videos_dir().filter(|d| std::fs::create_dir_all(d).is_ok()).and_then(|d| gravar::reserve(&d, &file)) else { return self.record_done() };
         self.rec_part = Some(part);
+        self.rec_target = if let gravar::Mode::Window(h) = mode { h as HWND } else { null_mut() };
         let pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }.to_string();
         let child = std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(["--gravar", &hwnd.to_string(), &name, &gravar::mode_arg(mode), self.rec_prefs.sound_arg()]).arg(&fin).arg(&pid).spawn());
         let Ok(child) = child else { return self.record_done() };
@@ -1454,6 +1501,17 @@ impl App {
         use windows_sys::Win32::System::Threading::{INFINITE, RegisterWaitForSingleObject, WT_EXECUTEONLYONCE};
         unsafe { RegisterWaitForSingleObject(&mut self.rec_wait, child.as_raw_handle() as HANDLE, Some(exited), self.hwnd as _, INFINITE, WT_EXECUTEONLYONCE) };
         self.rec_child = Some(child);
+    }
+
+    /// Moldura de 3 px em volta do que grava: por fora da janela ou da região,
+    /// por dentro do monitor (por fora não apareceria).
+    fn rec_frame_place(&self) {
+        let r = self.rec_rect;
+        let t = (3 * cursor_dpi().max(96) as i32 + 48) / 96;
+        let r = if monitor_at(r.0, r.1) == r { (r.0 + t, r.1 + t, r.2 - 2 * t, r.3 - 2 * t) } else { r };
+        for (h, b) in self.rec_frame.iter().zip(gravar::ring(r, t)) {
+            place(*h, b);
+        }
     }
 
     /// O processo da gravação saiu (ou nem abriu): deu certo se saiu com 0; 2 =
@@ -1474,10 +1532,12 @@ impl App {
             unsafe { CloseHandle(self.rec_stop) };
             self.rec_stop = null_mut();
         }
-        if !self.rec_dot.is_null() {
-            unsafe { DestroyWindow(self.rec_dot) };
-            self.rec_dot = null_mut();
+        for h in core::mem::take(&mut self.rec_frame).into_iter().chain([core::mem::replace(&mut self.rec_dot, null_mut())]) {
+            if !h.is_null() {
+                unsafe { DestroyWindow(h) };
+            }
         }
+        self.rec_target = null_mut();
         unsafe { KillTimer(self.hwnd, REC_TIMER) };
         self.rec_t0 = None;
         self.paint_bar();
@@ -1506,7 +1566,36 @@ impl App {
         let bar = &mut self.bar;
         let Some(s) = bar.surface.as_mut() else { return };
         toolbar::paint(&bar.layout, &st, s.pixels());
-        s.present(bar.hwnd, None, None);
+        s.present_alpha(bar.hwnd, if bar.faded && !bar.near { BAR_FADED } else { 255 });
+    }
+
+    fn toggle_bar_fade(&mut self) {
+        self.bar.faded = !self.bar.faded;
+        instalar::set_pref("BarraTransparente", self.bar.faded as u32);
+        self.paint_bar();
+    }
+
+    /// Mouse entrou na barra (ou o timer viu que saiu): opaca perto, transparente longe.
+    fn bar_near(&mut self, near: bool) {
+        if near == self.bar.near {
+            return;
+        }
+        self.bar.near = near;
+        unsafe {
+            if near {
+                SetTimer(self.bar.hwnd, BAR_TIMER, 150, None);
+            } else {
+                KillTimer(self.bar.hwnd, BAR_TIMER);
+            }
+        }
+        if self.bar.faded {
+            self.paint_bar();
+        }
+    }
+
+    fn cursor_on_bar(&self) -> bool {
+        let (mut r, mut pt) = (RECT { left: 0, top: 0, right: 0, bottom: 0 }, POINT { x: 0, y: 0 });
+        unsafe { GetWindowRect(self.bar.hwnd, &mut r) != 0 && GetCursorPos(&mut pt) != 0 && pt.x >= r.left && pt.x < r.right && pt.y >= r.top && pt.y < r.bottom }
     }
 
     /// Recalcula a barra para o DPI do monitor onde ela está.
@@ -1553,7 +1642,7 @@ impl App {
             Item::Hide => self.set_hidden(!self.hidden),
             Item::Guides => self.cycle_guides(),
             Item::Save => self.save_print(),
-            Item::Rec if self.rec == gravar::State::Idle || self.rec == gravar::State::Failed => self.rec_menu(),
+            Item::Rec if self.rec == gravar::State::Idle || self.rec == gravar::State::Failed => self.bar.rec_menu = true,
             Item::Rec => self.toggle_record(),
             Item::Fade => self.toggle_fade(),
             Item::Spot => self.toggle_look(false),
@@ -1585,10 +1674,11 @@ impl App {
                     It { id: MENU_HIDE, text: "Esconder desenhos\tCtrl+Shift+H", checked: self.hidden },
                     It { id: MENU_CLEAR, text: "Apagar tudo\tCtrl+Shift+X", checked: false },
                     It { id: MENU_SAVE, text: "Salvar print\tCtrl+Shift+S", checked: false },
+                    It { id: MENU_PRINT_REG, text: "Print de uma região (arraste)\tCtrl+Shift+A", checked: false },
                     Sep,
                 ];
                 self.rec_entries(&mut v);
-                v.extend([Sep, It { id: MENU_AUTOSTART, text: "Abrir com o Windows", checked: auto }, Sep, It { id: MENU_QUIT, text: "Sair\tCtrl+Shift+Q", checked: false }]);
+                v.extend([Sep, It { id: MENU_BAR_FADE, text: "Barra transparente\tCtrl+Shift+B", checked: self.bar.faded }, It { id: MENU_AUTOSTART, text: "Abrir com o Windows", checked: auto }, Sep, It { id: MENU_QUIT, text: "Sair\tCtrl+Shift+Q", checked: false }]);
                 let id = bandeja::menu(self.hwnd, &v);
                 match id {
                     MENU_BAR => self.set_bar(!self.bar.shown),
@@ -1596,9 +1686,11 @@ impl App {
                     MENU_HIDE => self.set_hidden(!self.hidden),
                     MENU_CLEAR => self.clear_all(),
                     MENU_SAVE => self.save_print(),
+                    MENU_PRINT_REG => self.print_region(),
                     MENU_AUTOSTART => {
                         instalar::set_autostart(!auto);
                     }
+                    MENU_BAR_FADE => self.toggle_bar_fade(),
                     MENU_QUIT => unsafe {
                         DestroyWindow(self.hwnd);
                     },
@@ -1684,6 +1776,19 @@ impl App {
         let (ox, oy, w, h) = (self.ox, self.oy, self.canvas.w, self.canvas.h);
         match self.print.press(|| capture(ox, oy, w, h)) {
             Press::Start => self.start_print(None),
+            Press::Queued => {}
+            Press::Full => self.show_toast(false),
+        }
+    }
+
+    /// Print de uma área: a cópia sai já (o BitBlt é rápido) e entra na fila do print.
+    fn save_print_area(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        let mut shot = capture(x, y, w, h);
+        if shot.is_none() {
+            return self.show_toast(false);
+        }
+        match self.print.press(|| shot.take()) {
+            Press::Start => self.start_print(shot),
             Press::Queued => {}
             Press::Full => self.show_toast(false),
         }
@@ -1825,18 +1930,24 @@ struct Picking {
     hook: HHOOK,
     /// Monitor do cursor no começo: a região fica dentro dele.
     mon: (i32, i32, i32, i32),
-    /// Região: a tela escurecida do monitor (a imagem só existe enquanto escolhe).
-    dim: HWND,
-    surf: Option<Surface>,
+    /// O que escurece: o monitor (região) ou todas as telas (janela).
+    area: (i32, i32, i32, i32),
+    /// Escurecido fora da seleção, moldura dela e a etiqueta (caixas sólidas).
+    dim: [HWND; 4],
+    edge: [HWND; 4],
+    label: HWND,
     from: Option<(i32, i32)>,
-    sel: Option<(i32, i32, i32, i32)>,
-    /// Janela: a que está sob o cursor e a moldura dela.
+    /// Janela: a que está sob o cursor.
     target: HWND,
-    frame: [HWND; 4],
+    /// Região para print (Ctrl+Shift+A), não para gravar.
+    print: bool,
 }
 
-/// Escurecido da região (preto a ~30%, pré-multiplicado).
-const PICK_DIM: u32 = 0x4D00_0000;
+/// Classes das caixas sólidas: o escurecido (preto) e a moldura (vermelha).
+const DARK_CLASS: &str = "RabiscoEscuro";
+const EDGE_CLASS: &str = "RabiscoBorda";
+/// Escurecido da escolha (preto a 45%).
+const PICK_DIM: u8 = 115;
 
 unsafe extern "system" fn pick_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
@@ -1887,46 +1998,156 @@ fn window_at(x: i32, y: i32) -> HWND {
     }
 }
 
-/// Repinta a região escolhida: o escurecido volta onde ela estava e some dentro
-/// da nova, com borda branca de 2 px; só a caixa que mudou vai para a tela.
-fn pick_region_paint(pk: &mut Picking, sel: (i32, i32, i32, i32)) {
-    let Some(sf) = pk.surf.as_mut() else { return };
-    let (mw, mh, b) = (pk.mon.2, pk.mon.3, 2);
-    let boxed = |r: (i32, i32, i32, i32)| (r.0 - b, r.1 - b, r.0 + r.2 + b, r.1 + r.3 + b);
-    let n = boxed(sel);
-    let o = pk.sel.map_or(n, boxed);
-    let (x0, y0, x1, y1) = (n.0.min(o.0).max(0), n.1.min(o.1).max(0), n.2.max(o.2).min(mw), n.3.max(o.3).min(mh));
-    let px = sf.pixels();
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let inside = x >= sel.0 && x < sel.0 + sel.2 && y >= sel.1 && y < sel.1 + sel.3;
-            let border = x >= n.0 && x < n.2 && y >= n.1 && y < n.3;
-            px[(y * mw + x) as usize] = if inside { 0 } else if border { 0xFFFF_FFFF } else { PICK_DIM };
-        }
+/// Mostra a escolha: escurece `area` fora de `sel`, põe a moldura nela e a
+/// etiqueta em cima (nome e tamanho, ou o que fazer, sem seleção). `mon` = o
+/// monitor onde a etiqueta fica.
+fn pick_show(pk: &mut Picking, sel: Option<(i32, i32, i32, i32)>, mon: (i32, i32, i32, i32)) {
+    let r = sel.unwrap_or((pk.area.0, pk.area.1, 0, 0));
+    for (h, b) in pk.dim.iter().zip(gravar::around(r, pk.area)) {
+        place(*h, b);
     }
-    pk.sel = Some(sel);
-    sf.present(pk.dim, None, Some(Rect { x0, y0, x1, y1 }));
+    let t = (3 * cursor_dpi().max(96) as i32 + 48) / 96;
+    for (h, b) in pk.edge.iter().zip(gravar::ring(r, t)) {
+        place(*h, if sel.is_some() { b } else { (0, 0, 0, 0) });
+    }
+    let text = match (sel, pk.kind, pk.print) {
+        (Some(s), gravar::Pick::Window, _) => format!("{}   {} × {}", window_title(pk.target), s.2, s.3),
+        (Some(s), ..) => format!("{} × {}", s.2, s.3),
+        (None, gravar::Pick::Window, _) => "Clique na janela que vai ser gravada   ·   Esc cancela".into(),
+        (None, _, false) => "Arraste a área que vai ser gravada   ·   Esc cancela".into(),
+        (None, _, true) => "Arraste a área do print   ·   Esc cancela".into(),
+    };
+    let sc = cursor_dpi().max(96) as f32 / 96.0;
+    let Some(sf) = label_surface(&text, sc, 0) else { return };
+    let gap = (8.0 * sc) as i32;
+    let (x, y) = match sel {
+        // Em cima da seleção; sem espaço, dentro dela.
+        Some(s) if s.1 - sf.h - gap >= mon.1 => (s.0, s.1 - sf.h - gap),
+        Some(s) => (s.0 + gap, s.1 + gap),
+        None => (mon.0 + (mon.2 - sf.w) / 2, mon.1 + 6 * gap),
+    };
+    let x = x.clamp(mon.0, (mon.0 + mon.2 - sf.w).max(mon.0));
+    sf.present(pk.label, Some((x, y)), None);
+    unsafe {
+        ShowWindow(pk.label, SW_SHOWNOACTIVATE);
+        SetWindowPos(pk.label, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
-/// Moldura vermelha em volta de `h`: quatro janelas finas, como as guias.
-fn frame_windows(h: HWND) -> [HWND; 4] {
-    let mut out = [null_mut(); 4];
+/// Caixa de cor sólida (o fundo da classe), meio transparente por `alpha`,
+/// fora da captura e com o clique passando. Sem imagem: custa só a janela.
+fn solid_box(class: &str, alpha: u8) -> HWND {
+    let (class, title) = (wide(class), wide("Rabisco"));
+    unsafe {
+        let h = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            class.as_ptr(),
+            title.as_ptr(),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            null_mut(),
+            null_mut(),
+            GetModuleHandleW(null()),
+            null(),
+        );
+        SetLayeredWindowAttributes(h, 0, alpha, LWA_ALPHA);
+        SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE);
+        h
+    }
+}
+
+/// Põe a caixa em (x, y, w, h), por cima de tudo; vazia, esconde.
+fn place(h: HWND, (x, y, w, hh): (i32, i32, i32, i32)) {
+    unsafe {
+        if w <= 0 || hh <= 0 {
+            ShowWindow(h, SW_HIDE);
+        } else {
+            SetWindowPos(h, HWND_TOPMOST, x, y, w, hh, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+    }
+}
+
+/// Contorno visível da janela (sem a sombra e a borda invisível do Windows 10/11).
+fn window_bounds(h: HWND) -> Option<(i32, i32, i32, i32)> {
     if h.is_null() {
-        return out;
+        return None;
     }
     let mut r: RECT = unsafe { core::mem::zeroed() };
-    unsafe { GetWindowRect(h, &mut r) };
-    let t = (3 * cursor_dpi().max(96) as i32 + 48) / 96;
-    let (w, hh) = (r.right - r.left, r.bottom - r.top);
-    let sides = [(r.left - t, r.top - t, w + 2 * t, t), (r.left - t, r.bottom, w + 2 * t, t), (r.left - t, r.top, t, hh), (r.right, r.top, t, hh)];
-    for (o, (x, y, sw, sh)) in out.iter_mut().zip(sides) {
-        let Some(mut sf) = Surface::new(sw.max(1), sh.max(1)) else { continue };
-        sf.pixels().fill(0xFFE6_1E1E);
-        *o = aux_window();
-        sf.present(*o, Some((x, y)), None);
-        unsafe { ShowWindow(*o, SW_SHOWNOACTIVATE) };
+    let ok = unsafe {
+        windows_sys::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows_sys::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS as u32, &mut r as *mut RECT as _, size_of::<RECT>() as u32) == 0
+            || GetWindowRect(h, &mut r) != 0
+    };
+    (ok && r.right > r.left && r.bottom > r.top).then_some((r.left, r.top, r.right - r.left, r.bottom - r.top))
+}
+
+/// Título da janela (cortado em 50 letras) ou o nome do programa sem título.
+fn window_title(h: HWND) -> String {
+    let mut buf = [0u16; 256];
+    let n = unsafe { GetWindowTextW(h, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
+    let t = String::from_utf16_lossy(&buf[..n]);
+    let t = t.trim();
+    match t.chars().count() {
+        0 => "Janela".into(),
+        c if c > 50 => t.chars().take(49).chain(Some('…')).collect(),
+        _ => t.into(),
     }
-    out
+}
+
+/// Etiqueta: fundo escuro opaco, texto branco em Segoe UI (GDI, antialias em
+/// cinza) e, com `dot` > 0, a bola vermelha desse diâmetro na direita.
+fn label_surface(text: &str, sc: f32, dot: i32) -> Option<Surface> {
+    const BG: u32 = 0xFF1C_1C1E;
+    let px = (14.0 * sc).round() as i32;
+    let pad = (10.0 * sc).round() as i32;
+    let u: Vec<u16> = text.encode_utf16().collect();
+    let face = wide("Segoe UI");
+    unsafe {
+        let font = CreateFontW(-px, 0, 0, 0, FW_SEMIBOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32, OUT_TT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, ANTIALIASED_QUALITY as u32, (DEFAULT_PITCH | FF_SWISS) as u32, face.as_ptr());
+        if font.is_null() {
+            return None;
+        }
+        let mdc = CreateCompatibleDC(null_mut());
+        let old = SelectObject(mdc, font);
+        let mut sz = SIZE { cx: 0, cy: 0 };
+        GetTextExtentPoint32W(mdc, u.as_ptr(), u.len() as i32, &mut sz);
+        SelectObject(mdc, old);
+        DeleteDC(mdc);
+        let dot_w = if dot > 0 { dot + pad * 6 / 10 } else { 0 };
+        let (w, h) = (pad + sz.cx + dot_w + pad, sz.cy.max(dot) + pad);
+        let Some(mut s) = Surface::new(w, h) else {
+            DeleteObject(font);
+            return None;
+        };
+        s.pixels().fill(BG);
+        let old = SelectObject(s.dc, font);
+        SetBkMode(s.dc, TRANSPARENT as i32);
+        SetTextColor(s.dc, 0x00FF_FFFF);
+        TextOutW(s.dc, pad, (h - sz.cy) / 2, u.as_ptr(), u.len() as i32);
+        GdiFlush();
+        SelectObject(s.dc, old);
+        DeleteObject(font);
+        // O GDI zera o alfa onde escreve; o fundo é opaco, então tudo volta a 255.
+        for p in s.pixels() {
+            *p |= 0xFF00_0000;
+        }
+        if dot > 0 {
+            let (cx, cy, r) = ((w - pad) as f32 - dot as f32 / 2.0, h as f32 / 2.0, dot as f32 / 2.0);
+            let red = toolbar::REC;
+            let px = s.pixels();
+            for y in 0..h {
+                for x in (w - pad - dot).max(0)..(w - pad) {
+                    let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                    let a = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+                    let mix = |sh: u32| ((red >> sh & 0xFF) as f32 * a + (BG >> sh & 0xFF) as f32 * (1.0 - a)) as u32;
+                    px[(y * w + x) as usize] = 0xFF00_0000 | mix(16) << 16 | mix(8) << 8 | mix(0);
+                }
+            }
+        }
+        Some(s)
+    }
 }
 
 /// Janela em camadas sem dono, por cima de tudo e com o clique passando
@@ -2277,17 +2498,26 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
             }
             WM_REC_STARTED => {
                 let (x, y) = (wp as u16 as i16 as i32, (wp >> 16) as u16 as i16 as i32);
-                let w = (lp & 0xFFFF) as i32;
+                let (w, h) = ((lp & 0xFFFF) as i32, (lp >> 16 & 0xFFFF) as i32);
                 if a.rec != gravar::State::Idle && a.rec_dot.is_null() {
                     let (d, m) = dot_size();
                     a.rec_area = (x, y, w, d, m);
+                    a.rec_rect = (x, y, w, h);
                     a.rec_t0 = Some(std::time::Instant::now());
                     a.rec_dot = rec_dot(null_mut(), a.rec_area, 0);
+                    a.rec_frame = core::array::from_fn(|_| solid_box(EDGE_CLASS, 255));
+                    a.rec_frame_place();
                     SetTimer(hwnd, REC_TIMER, 1000, None);
                 }
                 0
             }
             WM_TIMER if wp == REC_TIMER => {
+                // Janela gravada que mudou de lugar: a moldura e o contador vão junto.
+                if let Some(r) = window_bounds(a.rec_target).filter(|r| *r != a.rec_rect) {
+                    a.rec_rect = r;
+                    a.rec_area = (r.0, r.1, r.2, a.rec_area.3, a.rec_area.4);
+                    a.rec_frame_place();
+                }
                 if let Some(t0) = a.rec_t0 {
                     rec_dot(a.rec_dot, a.rec_area, t0.elapsed().as_secs());
                 }
@@ -2382,11 +2612,13 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 }
             }
             WM_POINTERUPDATE => {
+                a.bar_near(true);
                 let item = item_at(a, pointer_id(wp));
                 a.bar_hover(item);
                 0
             }
             WM_POINTERDOWN => {
+                a.bar_near(true);
                 if (wp >> 16) as u32 & POINTER_FLAG_FIRSTBUTTON != 0 {
                     if let Some(item) = item_at(a, pointer_id(wp)) {
                         a.bar_click(item);
@@ -2394,11 +2626,18 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 }
                 0
             }
+            WM_POINTERUP if a.bar.rec_menu => {
+                // Aberto no aperto, o menu recebia o soltar do botão e fechava.
+                a.bar.rec_menu = false;
+                a.rec_menu();
+                0
+            }
             WM_POINTERLEAVE => {
                 a.bar_hover(None);
                 0
             }
             WM_NCPOINTERUPDATE => {
+                a.bar_near(true);
                 // Em cima da alça ou do fundo: só a dica da alça.
                 let (sx, sy) = lparam_point(lp);
                 let (x, y) = a.bar_point(sx, sy);
@@ -2412,6 +2651,12 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             }
             WM_POINTERWHEEL | WM_MOUSEWHEEL => {
                 a.resize_pen(((wp >> 16) as u16 as i16).signum() as i32);
+                0
+            }
+            WM_TIMER if wp == BAR_TIMER => {
+                if !a.cursor_on_bar() {
+                    a.bar_near(false);
+                }
                 0
             }
             WM_TIMER if wp == TIP_TIMER => {
@@ -2493,7 +2738,7 @@ unsafe fn perf_memoria(file: &str) {
     // Região pelo menu: a tela escurecida só existe enquanto escolhe. O mouse
     // vem direto para o pick_event (o gancho não vê o mouse do desktop do Rafa).
     let (mx, my, _, _) = cursor_monitor();
-    a.pick_start(gravar::Pick::Region);
+    a.pick_start(gravar::Pick::Region, false);
     a.pick_event(1, mx + 101, my + 101);
     a.pick_event(0, mx + 400, my + 300);
     mark("escolhendo_regiao");
@@ -2583,18 +2828,16 @@ fn dot_size() -> (i32, i32) {
 /// m) com o tempo gravado (mm:ss) à esquerda, excluído da captura: aparece na
 /// tela e não no vídeo. `reuse` nulo cria a janela; senão só repinta.
 fn rec_dot(reuse: HWND, (x, y, w, d, m): (i32, i32, i32, i32, i32), secs: u64) -> HWND {
-    let s = d as f32 / 12.0;
-    let text = gravar::clock(secs);
-    let (bw, bh) = toolbar::badge_size(s, text.len(), d);
+    let sc = d as f32 / 12.0;
     let hwnd = if reuse.is_null() { aux_window() } else { reuse };
-    let Some(mut sf) = Surface::new(bw, bh) else { return hwnd };
-    toolbar::paint_badge(sf.pixels(), bw, bh, s, &text, d);
+    let Some(sf) = label_surface(&format!("REC  {}", gravar::clock(secs)), sc, d) else { return hwnd };
+    let pad = (10.0 * sc).round() as i32;
     unsafe {
         if reuse.is_null() {
             SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         }
-        // O ponto continua onde estava (canto, margem m); o texto cresce para a esquerda.
-        sf.present(hwnd, Some((x + w - m - bw, y + m - (bh - d) / 2)), None);
+        // A bola fica onde sempre esteve (canto, margem m); a etiqueta cresce para a esquerda.
+        sf.present(hwnd, Some((x + w - m + pad - sf.w, y + m + d / 2 - sf.h / 2)), None);
         if reuse.is_null() {
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
@@ -2708,14 +2951,23 @@ fn main() {
         let overlay_class = wide("RabiscoOverlay");
         let bar_class = wide("RabiscoBarra");
         let aux_class = wide("RabiscoAviso");
-        let classes: [(&Vec<u16>, WNDPROC); 3] =
-            [(&overlay_class, Some(overlay_proc)), (&bar_class, Some(bar_proc)), (&aux_class, Some(DefWindowProcW))];
-        for (class, proc_) in classes {
+        let (dark_class, edge_class) = (wide(DARK_CLASS), wide(EDGE_CLASS));
+        // As caixas sólidas pintam só o fundo da classe: nada de imagem na memória.
+        let red = toolbar::REC;
+        let classes: [(&Vec<u16>, WNDPROC, HBRUSH); 5] = [
+            (&overlay_class, Some(overlay_proc), null_mut()),
+            (&bar_class, Some(bar_proc), null_mut()),
+            (&aux_class, Some(DefWindowProcW), null_mut()),
+            (&dark_class, Some(DefWindowProcW), GetStockObject(BLACK_BRUSH) as HBRUSH),
+            (&edge_class, Some(DefWindowProcW), CreateSolidBrush((red >> 16) | (red & 0xFF00) | (red & 0xFF) << 16)),
+        ];
+        for (class, proc_, brush) in classes {
             let wc = WNDCLASSEXW {
                 cbSize: size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: proc_,
                 hInstance: hinst,
                 hCursor: arrow,
+                hbrBackground: brush,
                 lpszClassName: class.as_ptr(),
                 ..core::mem::zeroed()
             };
@@ -2816,6 +3068,9 @@ fn main() {
                 tip_text: wide(""),
                 tip_shown: false,
                 shown: !start_hidden,
+                faded: perf || instalar::pref("BarraTransparente").unwrap_or(1) != 0,
+                near: false,
+                rec_menu: false,
             },
             tray_icon: {
                 let n = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
@@ -2834,6 +3089,9 @@ fn main() {
             rec_part: None,
             rec_wait: null_mut(),
             rec_dot: null_mut(),
+            rec_frame: [null_mut(); 4],
+            rec_rect: (0, 0, 0, 0),
+            rec_target: null_mut(),
             rec_area: (0, 0, 0, 0, 0),
             rec_t0: None,
             // O --perf-memoria não lê o registro: o padrão (monitor, som do sistema).
@@ -2861,7 +3119,7 @@ fn main() {
 
         let mods = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
         let mut failed = Vec::new();
-        for (id, vk, label) in [(HK_DRAW, 'D', "Ctrl+Shift+D"), (HK_HIDE, 'H', "Ctrl+Shift+H"), (HK_CLEAR, 'X', "Ctrl+Shift+X"), (HK_SAVE, 'S', "Ctrl+Shift+S"), (HK_REC, 'R', "Ctrl+Shift+R"), (HK_QUIT, 'Q', "Ctrl+Shift+Q")] {
+        for (id, vk, label) in [(HK_DRAW, 'D', "Ctrl+Shift+D"), (HK_HIDE, 'H', "Ctrl+Shift+H"), (HK_CLEAR, 'X', "Ctrl+Shift+X"), (HK_SAVE, 'S', "Ctrl+Shift+S"), (HK_REC, 'R', "Ctrl+Shift+R"), (HK_PRINT_REG, 'A', "Ctrl+Shift+A"), (HK_BAR, 'B', "Ctrl+Shift+B"), (HK_QUIT, 'Q', "Ctrl+Shift+Q")] {
             if RegisterHotKey(hwnd, id, mods, vk as u32) == 0 {
                 failed.push(label);
             }

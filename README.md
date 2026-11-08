@@ -29,6 +29,8 @@ Feito em Rust puro com a API do Windows (`windows-sys`), sem framework de interf
 
 Abra o Rabisco. A barra aparece na esquerda da tela, e um ícone aparece na bandeja, ao lado do relógio. No Windows 11, ele pode ficar escondido na setinha `^`: arraste-o para fora para deixá-lo sempre à vista.
 
+**Barra transparente:** longe do mouse, a barra fica quase invisível e volta ao passar o mouse. `Ctrl+Shift+B` (ou "Barra transparente" na bandeja) liga e desliga.
+
 **Na bandeja:** um clique no ícone mostra ou guarda a barra. O botão direito abre um menu com desenhar, esconder os desenhos, apagar tudo, **Abrir com o Windows** (liga e desliga) e sair. O ✕ da barra também guarda o Rabisco na bandeja, sem fechar.
 
 <img src="imagens/barra.png" alt="Barra de ferramentas" width="120" align="right">
@@ -64,7 +66,9 @@ Escolher uma ferramenta ou uma cor liga o modo desenho. Passe o mouse em cima de
 | `Ctrl+Shift+H` | Esconde/mostra os desenhos |
 | `Ctrl+Shift+X` | Apaga tudo |
 | `Ctrl+Shift+S` | Salva print da tela com as anotações |
+| `Ctrl+Shift+A` | Print de uma área: arraste um retângulo |
 | `Ctrl+Shift+R` | Começa / para a gravação de vídeo |
+| `Ctrl+Shift+B` | Barra transparente longe do mouse: liga / desliga |
 | `Ctrl+Shift+Q` | Fecha o Rabisco |
 
 ### Teclas no modo desenho
@@ -93,6 +97,8 @@ Escolher uma ferramenta ou uma cor liga o modo desenho. Passe o mouse em cima de
 
 A barra não entra no print; as guias entram, se estiverem ligadas.
 
+**Print de uma área:** `Ctrl+Shift+A` (ou "Print de uma região" na bandeja). O monitor escurece; arraste um retângulo e só aquela área vai para a área de transferência e para a pasta, como o print inteiro. `Esc` ou o botão direito cancelam.
+
 ### Marcadores, texto e fade
 - **Marcador (`N`):** cada clique põe o próximo número (o maior na tela + 1, até 99).
 - **Texto (`T`):** clique e digite, na cor atual. `Enter` quebra a linha; `Esc` ou clicar fora confirma.
@@ -104,7 +110,8 @@ A barra não entra no print; as guias entram, se estiverem ligadas.
 
 ### Gravar a tela em vídeo
 O botão ● da barra (ou a bandeja) abre o menu: **Gravar o monitor**, **Gravar uma janela** (clique nela), **Gravar uma região** (arraste), **Som do sistema** e **Microfone**. `Ctrl+Shift+R` grava do último jeito escolhido e para a gravação.
-- Enquanto grava, um ponto vermelho com o tempo fica no canto da área gravada. Ele não sai no vídeo, nem a barra.
+- Escolhendo a janela ou a região, o resto da tela escurece e uma etiqueta mostra o nome da janela e o tamanho em pixels.
+- Enquanto grava, uma moldura vermelha cerca o que está sendo gravado e uma etiqueta "REC mm:ss" fica no canto. Nada disso sai no vídeo, nem a barra.
 - O vídeo vai para `Vídeos\Rabisco\rabisco_AAAA-MM-DD_HHhMMmSS.mp4` (H.264, 30 quadros por segundo).
 - Sem nada escolhido: o monitor do cursor, com o som do sistema e sem o microfone.
 - Fechar a janela que está sendo gravada termina o vídeo. Se o Rabisco fechar à força, o vídeo é salvo assim mesmo.

@@ -173,80 +173,7 @@ const SELECTED: u32 = 0x4A5059;
 const FG: u32 = 0xE8EAED;
 const DIM: u32 = 0x6B6F75;
 const GRIP: u32 = 0x8A8F96;
-const REC: u32 = 0xE61E1E;
-
-/// Dígitos 3x5 do contador (bit 2 = coluna da esquerda), e o ':' no fim.
-const DIGITS: [[u8; 5]; 11] = [
-    [7, 5, 5, 5, 7],
-    [2, 6, 2, 2, 7],
-    [7, 1, 7, 4, 7],
-    [7, 1, 7, 1, 7],
-    [5, 5, 7, 1, 1],
-    [7, 4, 7, 1, 7],
-    [7, 4, 7, 5, 7],
-    [7, 1, 1, 1, 1],
-    [7, 5, 7, 5, 7],
-    [7, 5, 7, 1, 7],
-    [0, 2, 0, 2, 0],
-];
-
-/// Lado do "pixel" dos dígitos do contador.
-fn digit_px(s: f32) -> i32 {
-    (2.0 * s).round().max(1.0) as i32
-}
-
-/// Tamanho do contador de gravação: o tempo (`chars` caracteres) e o ponto de diâmetro `d`.
-pub fn badge_size(s: f32, chars: usize, d: i32) -> (i32, i32) {
-    let px = digit_px(s);
-    let tw = chars as i32 * 4 * px - px;
-    ((4.0 * s).round() as i32 + tw + (6.0 * s).round() as i32 + d, d.max(5 * px) + 2 * s.round().max(1.0) as i32)
-}
-
-/// Pinta o contador (BGRA pré-multiplicado): "mm:ss" em branco com sombra e o
-/// ponto vermelho na direita. Sem fonte: os dígitos são 3x5.
-pub fn paint_badge(buf: &mut [u32], w: i32, h: i32, s: f32, text: &str, d: i32) {
-    buf.fill(0);
-    let px = digit_px(s);
-    let (x0, y0) = ((4.0 * s).round() as i32, (h - 5 * px) / 2);
-    let mut put = |x: i32, y: i32, c: u32| {
-        if x >= 0 && y >= 0 && x < w && y < h {
-            buf[(y * w + x) as usize] = c;
-        }
-    };
-    let sh = px.max(2) / 2;
-    // A sombra primeiro; o branco vem por cima.
-    for (off, color) in [(sh, 0xA000_0000u32), (0, 0xFFFF_FFFF)] {
-        for (i, ch) in text.chars().enumerate() {
-            let g = match ch {
-                '0'..='9' => DIGITS[ch as usize - '0' as usize],
-                ':' => DIGITS[10],
-                _ => continue,
-            };
-            for (row, bits) in g.iter().enumerate() {
-                for col in 0..3 {
-                    if bits >> (2 - col) & 1 == 0 {
-                        continue;
-                    }
-                    let (gx, gy) = (x0 + i as i32 * 4 * px + col * px + off, y0 + row as i32 * px + off);
-                    for k in 0..px * px {
-                        put(gx + k % px, gy + k / px, color);
-                    }
-                }
-            }
-        }
-    }
-    let (cx, cy, r) = ((w - d) as f32 + d as f32 / 2.0, h as f32 / 2.0, d as f32 / 2.0);
-    for y in 0..h {
-        for x in (w - d).max(0)..w {
-            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
-            let a = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
-            if a > 0.0 {
-                let c = |v: f32| (v * a) as u32;
-                buf[(y * w + x) as usize] = c(255.0) << 24 | c(230.0) << 16 | c(30.0) << 8 | c(30.0);
-            }
-        }
-    }
-}
+pub const REC: u32 = 0xE61E1E;
 
 /// Pinta em `buf` (w*h, BGRA pré-multiplicado). Ícones passam por uma máscara
 /// de cobertura máxima para as emendas das linhas não engrossarem.
@@ -627,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn botao_gravar_e_contador() {
+    fn botao_gravar() {
         let l = layout(1.0);
         assert!(l.items.iter().any(|&(i, _)| i == Item::Rec));
         let colors = [0xFF0000u32; 9];
@@ -639,25 +566,6 @@ mod tests {
             paint(&l, &st, &mut buf);
             // ● e ■ vermelhos no meio do botão.
             assert!(buf[centro] >> 16 & 0xFF > 0xC0 && buf[centro] & 0xFF < 0x40, "{rec}: {:08x}", buf[centro]);
-        }
-        let (w, h) = badge_size(1.0, 5, 12);
-        assert_eq!((w, h), (4 + 38 + 6 + 12, 14));
-        let mut b = vec![0u32; (w * h) as usize];
-        paint_badge(&mut b, w, h, 1.0, "01:23", 12);
-        let brancos = b.iter().filter(|&&p| p == 0xFFFF_FFFF).count();
-        assert!(brancos > 40, "{brancos} pixels de texto");
-        assert_eq!(b[(h / 2 * w + w - 6) as usize] >> 16 & 0xFF, 230);
-        // Cada dígito tem um desenho diferente.
-        let um = |t: &str| {
-            let mut b = vec![0u32; (w * h) as usize];
-            paint_badge(&mut b, w, h, 1.0, t, 12);
-            b
-        };
-        let todos: Vec<Vec<u32>> = (0..10).map(|d| um(&format!("0{d}:00"))).collect();
-        for i in 0..10 {
-            for j in i + 1..10 {
-                assert_ne!(todos[i], todos[j], "{i} e {j}");
-            }
         }
     }
 

@@ -387,6 +387,26 @@ pub fn drag_rect(a: (i32, i32), b: (i32, i32)) -> (i32, i32, i32, i32) {
 }
 
 /// Tempo gravado no contador: mm:ss, e h:mm:ss passando de uma hora.
+pub type Rect4 = (i32, i32, i32, i32);
+
+/// As quatro faixas de espessura `t` coladas por fora de `r` (x, y, w, h):
+/// cima, baixo, esquerda, direita.
+pub fn ring(r: Rect4, t: i32) -> [Rect4; 4] {
+    let (x, y, w, h) = r;
+    [(x - t, y - t, w + 2 * t, t), (x - t, y + h, w + 2 * t, t), (x - t, y, t, h), (x + w, y, t, h)]
+}
+
+/// As quatro faixas de `area` em volta de `r` (recortado dentro dela): o que
+/// escurece fora da seleção. `r` vazio = a área inteira (na faixa de baixo).
+pub fn around(r: Rect4, area: Rect4) -> [Rect4; 4] {
+    let (ax, ay, aw, ah) = area;
+    let x0 = r.0.clamp(ax, ax + aw);
+    let y0 = r.1.clamp(ay, ay + ah);
+    let x1 = (r.0 + r.2).clamp(x0, ax + aw);
+    let y1 = (r.1 + r.3).clamp(y0, ay + ah);
+    [(ax, ay, aw, y0 - ay), (ax, y1, aw, ay + ah - y1), (ax, y0, x0 - ax, y1 - y0), (x1, y0, ax + aw - x1, y1 - y0)]
+}
+
 pub fn clock(secs: u64) -> String {
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m:02}:{s:02}") }
@@ -657,6 +677,21 @@ mod tests {
         assert_eq!(drag_rect((651, 501), (10, 20)), (10, 20, 640, 480));
         assert_eq!(drag_rect((-100, 50), (-300, 10)), (-300, 10, 200, 40));
         assert_eq!(drag_rect((5, 5), (5, 6)), (5, 5, 0, 0));
+    }
+
+    #[test]
+    fn moldura_e_escurecido_cobrem_sem_sobrar() {
+        assert_eq!(ring((10, 20, 100, 50), 3), [(7, 17, 106, 3), (7, 70, 106, 3), (7, 20, 3, 50), (110, 20, 3, 50)]);
+        let area = (-1920, 0, 3840, 1080);
+        let area_px = |b: &[Rect4]| b.iter().map(|r| r.2 as i64 * r.3 as i64).sum::<i64>();
+        // Seleção no meio: as faixas somam a área menos a seleção, sem lado negativo.
+        let b = around((0, 100, 300, 200), area);
+        assert!(b.iter().all(|r| r.2 >= 0 && r.3 >= 0));
+        assert_eq!(area_px(&b), 3840 * 1080 - 300 * 200);
+        // Vazia: tudo escuro. Passando da borda: recorta.
+        assert_eq!(area_px(&around((-1920, 0, 0, 0), area)), 3840 * 1080);
+        let b = around((1800, -50, 500, 200), area);
+        assert_eq!(area_px(&b), 3840 * 1080 - 120 * 150);
     }
 
     #[test]
