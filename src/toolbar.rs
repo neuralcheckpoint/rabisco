@@ -2,7 +2,7 @@
 //! Os ícones são cápsulas como os traços, desenhados num quadrado de 24x24
 //! e escalados pelo DPI, então não há imagem nem fonte embutida.
 
-use crate::canvas::{Pt, Rect, Tool, coverage, ellipse, mul255, over, premul, seg_box};
+use crate::canvas::{Pt, Rect, Tool, coverage, ellipse, mul255, number_segments, over, premul, seg_box};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Item {
@@ -16,6 +16,18 @@ pub enum Item {
     Redo,
     Clear,
     Hide,
+    /// Liga e alterna as guias de enquadramento.
+    Guides,
+    /// Salvar print com as anotações.
+    Save,
+    /// Gravar vídeo (● abre o menu; ■ para).
+    Rec,
+    /// Liga/desliga o modo fade (traço novo some sozinho).
+    Fade,
+    /// Holofote: escurece tudo menos em volta do cursor.
+    Spot,
+    /// Lupa em volta do cursor.
+    Zoom,
 }
 
 /// Espessuras da caneta (px) nos 4 botões.
@@ -30,9 +42,15 @@ pub struct State<'a> {
     pub rgb: u32,
     pub size: f32,
     pub hidden: bool,
+    /// Alguma guia de enquadramento está ligada.
+    pub guides: bool,
+    /// Modo fade ligado.
+    pub fade: bool,
     pub hover: Option<Item>,
     pub can_undo: bool,
     pub can_redo: bool,
+    /// Gravando (o botão vira ■).
+    pub rec: bool,
     pub colors: &'a [u32],
 }
 
@@ -69,12 +87,16 @@ pub fn layout(s: f32) -> Layout {
         Item::Tool(Tool::Arrow),
         Item::Tool(Tool::Rect),
         Item::Tool(Tool::Ellipse),
+        Item::Tool(Tool::Number),
+        Item::Tool(Tool::Text),
+        Item::Guides,
+        Item::Fade,
     ];
     let half = INNER / 2.0;
     for (i, t) in tools.into_iter().enumerate() {
         put(t, PAD + (i % 2) as f32 * half, y + (i / 2) as f32 * 32.0, half, 32.0);
     }
-    y += 4.0 * 32.0;
+    y += 6.0 * 32.0;
 
     let mut sep = |y: &mut f32| {
         seps.push(px(*y + 4.5));
@@ -93,10 +115,13 @@ pub fn layout(s: f32) -> Layout {
     }
     y += 24.0;
     sep(&mut y);
-    for (i, a) in [Item::Undo, Item::Redo, Item::Clear, Item::Hide].into_iter().enumerate() {
+    for (i, a) in [Item::Undo, Item::Redo, Item::Clear, Item::Hide, Item::Spot, Item::Zoom].into_iter().enumerate() {
         put(a, PAD + (i % 2) as f32 * half, y + (i / 2) as f32 * 30.0, half, 30.0);
     }
-    y += 60.0 + PAD;
+    y += 90.0;
+    put(Item::Save, PAD, y, half, 30.0);
+    put(Item::Rec, PAD + half, y, half, 30.0);
+    y += 30.0 + PAD;
     Layout { w: px(W), h: px(y), s, items, seps }
 }
 
@@ -118,6 +143,8 @@ pub fn label(item: Item) -> String {
             Tool::Arrow => "Seta (A) · Shift trava em 45°",
             Tool::Rect => "Retângulo (R) · Shift deixa quadrado",
             Tool::Ellipse => "Elipse (O) · Shift deixa círculo",
+            Tool::Number => "Marcador numerado (N): cada clique põe 1, 2, 3… na cor atual",
+            Tool::Text => "Texto (T): clique e digite · Enter quebra a linha · Esc ou clicar fora confirma",
         }
         .into(),
         Item::Color(i) => format!("{} ({})", COLOR_NAMES[i], i + 1),
@@ -130,6 +157,12 @@ pub fn label(item: Item) -> String {
         Item::Redo => "Refazer (Ctrl+Y)".into(),
         Item::Clear => "Apagar tudo (C)".into(),
         Item::Hide => "Esconder/mostrar desenhos (Ctrl+Shift+H)".into(),
+        Item::Guides => "Guias (G): terços · 16:9 e área segura · terços no 16:9 · desligar".into(),
+        Item::Save => "Salvar print com as anotações (Ctrl+S, ou Ctrl+Shift+S em qualquer programa)".into(),
+        Item::Rec => "Gravar vídeo (Ctrl+Shift+R): o menu escolhe monitor, janela ou região e o som · gravando, para".into(),
+        Item::Fade => "Fade (F): os traços novos somem sozinhos 3 s depois".into(),
+        Item::Spot => "Holofote (S): escurece a tela menos em volta do cursor · roda muda o tamanho · Esc sai".into(),
+        Item::Zoom => "Zoom (Z): lupa em volta do cursor · roda de 1,5x a 4x · Esc sai".into(),
     }
 }
 
@@ -140,6 +173,80 @@ const SELECTED: u32 = 0x4A5059;
 const FG: u32 = 0xE8EAED;
 const DIM: u32 = 0x6B6F75;
 const GRIP: u32 = 0x8A8F96;
+const REC: u32 = 0xE61E1E;
+
+/// Dígitos 3x5 do contador (bit 2 = coluna da esquerda), e o ':' no fim.
+const DIGITS: [[u8; 5]; 11] = [
+    [7, 5, 5, 5, 7],
+    [2, 6, 2, 2, 7],
+    [7, 1, 7, 4, 7],
+    [7, 1, 7, 1, 7],
+    [5, 5, 7, 1, 1],
+    [7, 4, 7, 1, 7],
+    [7, 4, 7, 5, 7],
+    [7, 1, 1, 1, 1],
+    [7, 5, 7, 5, 7],
+    [7, 5, 7, 1, 7],
+    [0, 2, 0, 2, 0],
+];
+
+/// Lado do "pixel" dos dígitos do contador.
+fn digit_px(s: f32) -> i32 {
+    (2.0 * s).round().max(1.0) as i32
+}
+
+/// Tamanho do contador de gravação: o tempo (`chars` caracteres) e o ponto de diâmetro `d`.
+pub fn badge_size(s: f32, chars: usize, d: i32) -> (i32, i32) {
+    let px = digit_px(s);
+    let tw = chars as i32 * 4 * px - px;
+    ((4.0 * s).round() as i32 + tw + (6.0 * s).round() as i32 + d, d.max(5 * px) + 2 * s.round().max(1.0) as i32)
+}
+
+/// Pinta o contador (BGRA pré-multiplicado): "mm:ss" em branco com sombra e o
+/// ponto vermelho na direita. Sem fonte: os dígitos são 3x5.
+pub fn paint_badge(buf: &mut [u32], w: i32, h: i32, s: f32, text: &str, d: i32) {
+    buf.fill(0);
+    let px = digit_px(s);
+    let (x0, y0) = ((4.0 * s).round() as i32, (h - 5 * px) / 2);
+    let mut put = |x: i32, y: i32, c: u32| {
+        if x >= 0 && y >= 0 && x < w && y < h {
+            buf[(y * w + x) as usize] = c;
+        }
+    };
+    let sh = px.max(2) / 2;
+    // A sombra primeiro; o branco vem por cima.
+    for (off, color) in [(sh, 0xA000_0000u32), (0, 0xFFFF_FFFF)] {
+        for (i, ch) in text.chars().enumerate() {
+            let g = match ch {
+                '0'..='9' => DIGITS[ch as usize - '0' as usize],
+                ':' => DIGITS[10],
+                _ => continue,
+            };
+            for (row, bits) in g.iter().enumerate() {
+                for col in 0..3 {
+                    if bits >> (2 - col) & 1 == 0 {
+                        continue;
+                    }
+                    let (gx, gy) = (x0 + i as i32 * 4 * px + col * px + off, y0 + row as i32 * px + off);
+                    for k in 0..px * px {
+                        put(gx + k % px, gy + k / px, color);
+                    }
+                }
+            }
+        }
+    }
+    let (cx, cy, r) = ((w - d) as f32 + d as f32 / 2.0, h as f32 / 2.0, d as f32 / 2.0);
+    for y in 0..h {
+        for x in (w - d).max(0)..w {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let a = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+            if a > 0.0 {
+                let c = |v: f32| (v * a) as u32;
+                buf[(y * w + x) as usize] = c(255.0) << 24 | c(230.0) << 16 | c(30.0) << 8 | c(30.0);
+            }
+        }
+    }
+}
 
 /// Pinta em `buf` (w*h, BGRA pré-multiplicado). Ícones passam por uma máscara
 /// de cobertura máxima para as emendas das linhas não engrossarem.
@@ -214,6 +321,28 @@ impl Painter<'_> {
     }
 }
 
+/// Aviso de "print salvo" (✓) ou de falha (✗): tamanho em pixels.
+pub fn toast_size(s: f32) -> (i32, i32) {
+    ((96.0 * s).round() as i32, (64.0 * s).round() as i32)
+}
+
+pub fn paint_toast(buf: &mut [u32], s: f32, ok: bool) {
+    let (w, h) = toast_size(s);
+    buf.fill(0);
+    let mut p = Painter { buf, mask: vec![0; (w * h) as usize], dirty: Rect::EMPTY, w, h };
+    p.round_rect(Rect { x0: 0, y0: 0, x1: w, y1: h }, 14.0 * s, PANEL, 242, Some(EDGE));
+    let m = |u: f32, v: f32| -> Pt { [u * s, v * s, 3.4 * s] };
+    if ok {
+        p.seg(m(30.0, 33.0), m(42.0, 45.0));
+        p.seg(m(42.0, 45.0), m(66.0, 19.0));
+        p.ink(0x43A047);
+    } else {
+        p.seg(m(34.0, 19.0), m(62.0, 45.0));
+        p.seg(m(62.0, 19.0), m(34.0, 45.0));
+        p.ink(0xE53935);
+    }
+}
+
 pub fn paint(l: &Layout, st: &State, buf: &mut [u32]) {
     let s = l.s;
     buf.fill(0);
@@ -231,6 +360,8 @@ pub fn paint(l: &Layout, st: &State, buf: &mut [u32]) {
             Item::Tool(t) => st.draw && st.tool == t,
             Item::Size(i) => (st.size - SIZES[i]).abs() < 0.01,
             Item::Hide => st.hidden,
+            Item::Guides => st.guides,
+            Item::Fade => st.fade,
             _ => false,
         };
         let inset = Rect { x0: r.x0 + (2.0 * s) as i32, y0: r.y0 + (2.0 * s) as i32, x1: r.x1 - (2.0 * s) as i32, y1: r.y1 - (2.0 * s) as i32 };
@@ -336,6 +467,81 @@ fn icon(p: &mut Painter, item: Item, cx: f32, cy: f32, s: f32, fg: u32, st: &Sta
             line(p, &[(4.0, 6.0), (20.0, 6.0), (20.0, 18.0), (4.0, 18.0)], true, R);
             p.ink(fg);
         }
+        Item::Tool(Tool::Number) => {
+            let mut segs = Vec::new();
+            number_segments(12.0, 12.0, 9.0, R, 1, &mut segs);
+            for (a, b) in segs {
+                p.seg(m(a[0], a[1], R), m(b[0], b[1], R));
+            }
+            p.ink(fg);
+        }
+        Item::Guides => {
+            line(p, &[(4.0, 9.0), (20.0, 9.0)], false, R);
+            line(p, &[(4.0, 15.0), (20.0, 15.0)], false, R);
+            line(p, &[(9.0, 4.0), (9.0, 20.0)], false, R);
+            line(p, &[(15.0, 4.0), (15.0, 20.0)], false, R);
+            p.ink(fg);
+        }
+        Item::Rec => {
+            // ● parado; ■ gravando. Vermelho, como o ponto de gravando.
+            if st.rec {
+                for v in [8.5, 10.5, 12.0, 13.5, 15.5] {
+                    line(p, &[(8.5, v), (15.5, v)], false, 1.6);
+                }
+            } else {
+                dot(p, 12.0, 12.0, 5.5);
+            }
+            p.ink(REC);
+        }
+        Item::Save => {
+            // Disquete: contorno com o canto cortado, etiqueta e janelinha.
+            line(p, &[(5.0, 5.0), (16.0, 5.0), (19.0, 8.0), (19.0, 19.0), (5.0, 19.0)], true, R);
+            line(p, &[(8.0, 5.0), (8.0, 9.0), (15.0, 9.0), (15.0, 5.0)], false, R);
+            line(p, &[(8.0, 19.0), (8.0, 14.0), (16.0, 14.0), (16.0, 19.0)], false, R);
+            p.ink(fg);
+        }
+        Item::Tool(Tool::Text) => {
+            // "T" com serifa embaixo.
+            line(p, &[(5.0, 6.5), (5.0, 5.0), (19.0, 5.0), (19.0, 6.5)], false, R);
+            line(p, &[(12.0, 5.0), (12.0, 19.0)], false, R);
+            line(p, &[(9.0, 19.0), (15.0, 19.0)], false, R);
+            p.ink(fg);
+        }
+        Item::Fade => {
+            // Rabisco que se desfaz em pontos cada vez menores.
+            line(p, &[(3.5, 15.0), (6.0, 11.0), (8.5, 15.0), (11.0, 11.0)], false, R);
+            p.ink(fg);
+            for (u, v, r) in [(14.0, 13.0, 0.95), (17.0, 13.0, 0.75), (19.5, 13.0, 0.55)] {
+                dot(p, u, v, r);
+            }
+            p.ink(GRIP);
+        }
+        Item::Spot => {
+            // Círculo claro com raios em volta.
+            let mut segs = Vec::new();
+            ellipse(12.0, 12.0, 4.5, 4.5, R, 32, &mut segs);
+            for (a, b) in segs {
+                p.seg(m(a[0], a[1], R), m(b[0], b[1], R));
+            }
+            for k in 0..8 {
+                let t = std::f32::consts::FRAC_PI_4 * k as f32;
+                let (c, s2) = (t.cos(), t.sin());
+                line(p, &[(12.0 + 7.5 * c, 12.0 + 7.5 * s2), (12.0 + 9.5 * c, 12.0 + 9.5 * s2)], false, R);
+            }
+            p.ink(fg);
+        }
+        Item::Zoom => {
+            // Lupa com +.
+            let mut segs = Vec::new();
+            ellipse(10.5, 10.5, 6.0, 6.0, R, 40, &mut segs);
+            for (a, b) in segs {
+                p.seg(m(a[0], a[1], R), m(b[0], b[1], R));
+            }
+            line(p, &[(15.0, 15.0), (20.0, 20.0)], false, 1.4);
+            line(p, &[(8.0, 10.5), (13.0, 10.5)], false, R);
+            line(p, &[(10.5, 8.0), (10.5, 13.0)], false, R);
+            p.ink(fg);
+        }
         Item::Tool(Tool::Ellipse) => {
             let mut segs = Vec::new();
             ellipse(12.0, 12.0, 8.5, 6.5, R, 48, &mut segs);
@@ -411,7 +617,8 @@ mod tests {
     fn layout_cabe_e_acha_os_botoes() {
         let l = layout(1.0);
         assert_eq!(l.w, 80);
-        assert!(l.h < 360, "barra alta demais: {}", l.h);
+        // 461 px a 100%: cabe com folga numa tela de 1080p a 150% (720 px úteis).
+        assert!(l.h <= 470, "barra alta demais: {}", l.h);
         for &(item, r) in &l.items {
             assert!(r.x1 <= l.w && r.y1 <= l.h, "{item:?} fora da barra");
             assert_eq!(hit(&l, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), Some(item));
@@ -420,12 +627,47 @@ mod tests {
     }
 
     #[test]
+    fn botao_gravar_e_contador() {
+        let l = layout(1.0);
+        assert!(l.items.iter().any(|&(i, _)| i == Item::Rec));
+        let colors = [0xFF0000u32; 9];
+        let r = l.items.iter().find(|x| x.0 == Item::Rec).unwrap().1;
+        let centro = ((r.y0 + r.y1) / 2 * l.w + (r.x0 + r.x1) / 2) as usize;
+        for rec in [false, true] {
+            let mut buf = vec![0u32; (l.w * l.h) as usize];
+            let st = State { draw: false, tool: Tool::Pen, rgb: 0, size: 4.0, hidden: false, guides: false, fade: false, hover: None, can_undo: false, can_redo: false, rec, colors: &colors };
+            paint(&l, &st, &mut buf);
+            // ● e ■ vermelhos no meio do botão.
+            assert!(buf[centro] >> 16 & 0xFF > 0xC0 && buf[centro] & 0xFF < 0x40, "{rec}: {:08x}", buf[centro]);
+        }
+        let (w, h) = badge_size(1.0, 5, 12);
+        assert_eq!((w, h), (4 + 38 + 6 + 12, 14));
+        let mut b = vec![0u32; (w * h) as usize];
+        paint_badge(&mut b, w, h, 1.0, "01:23", 12);
+        let brancos = b.iter().filter(|&&p| p == 0xFFFF_FFFF).count();
+        assert!(brancos > 40, "{brancos} pixels de texto");
+        assert_eq!(b[(h / 2 * w + w - 6) as usize] >> 16 & 0xFF, 230);
+        // Cada dígito tem um desenho diferente.
+        let um = |t: &str| {
+            let mut b = vec![0u32; (w * h) as usize];
+            paint_badge(&mut b, w, h, 1.0, t, 12);
+            b
+        };
+        let todos: Vec<Vec<u32>> = (0..10).map(|d| um(&format!("0{d}:00"))).collect();
+        for i in 0..10 {
+            for j in i + 1..10 {
+                assert_ne!(todos[i], todos[j], "{i} e {j}");
+            }
+        }
+    }
+
+    #[test]
     fn pinta_sem_estourar() {
         let colors = [0xFF0000u32; 9];
         for s in [1.0, 1.25, 1.5, 2.0] {
             let l = layout(s);
             let mut buf = vec![0u32; (l.w * l.h) as usize];
-            let st = State { draw: true, tool: Tool::Pen, rgb: 0xFF0000, size: 4.0, hidden: false, hover: Some(Item::Undo), can_undo: true, can_redo: false, colors: &colors };
+            let st = State { draw: true, tool: Tool::Pen, rgb: 0xFF0000, size: 4.0, hidden: false, guides: true, fade: true, hover: Some(Item::Undo), can_undo: true, can_redo: false, rec: false, colors: &colors };
             paint(&l, &st, &mut buf);
             assert!(buf[(l.h / 2 * l.w + l.w / 2) as usize] >> 24 > 0);
         }

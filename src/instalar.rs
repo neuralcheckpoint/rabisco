@@ -60,6 +60,20 @@ fn set_dword(key: &str, value: &str, data: u32) {
     unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), REG_DWORD, &data as *const u32 as *const c_void, 4) };
 }
 
+const PREFS_KEY: &str = r"Software\Rabisco";
+
+/// Preferência do app (DWORD em HKCU\Software\Rabisco).
+pub fn pref(value: &str) -> Option<u32> {
+    let (k, v) = (wide(PREFS_KEY), wide(value));
+    let (mut data, mut len) = (0u32, 4u32);
+    let ok = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_DWORD, null_mut(), &mut data as *mut u32 as *mut c_void, &mut len) } == 0;
+    ok.then_some(data)
+}
+
+pub fn set_pref(value: &str, data: u32) {
+    set_dword(PREFS_KEY, value, data);
+}
+
 fn get_string(key: &str, value: &str) -> Option<String> {
     let (k, v) = (wide(key), wide(value));
     let mut buf = [0u16; 1024];

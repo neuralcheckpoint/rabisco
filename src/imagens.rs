@@ -6,56 +6,9 @@ use crate::toolbar::{self, Item};
 
 const COLORS: [u32; 9] = [0xE53935, 0xFB8C00, 0xFDD835, 0x43A047, 0x00ACC1, 0x1E88E5, 0xD81B60, 0xFFFFFF, 0x111111];
 
-/// PNG RGB sem compressão (deflate "stored"): sem dependência nenhuma.
+/// Grava o PNG com o codificador do próprio app.
 fn png(path: &str, w: i32, h: i32, bgra: &[u32]) {
-    fn crc32(data: &[u8]) -> u32 {
-        let mut c = !0u32;
-        for &b in data {
-            c ^= b as u32;
-            for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
-            }
-        }
-        !c
-    }
-    fn chunk(out: &mut Vec<u8>, kind: &[u8], data: &[u8]) {
-        out.extend((data.len() as u32).to_be_bytes());
-        let mut body = kind.to_vec();
-        body.extend(data);
-        out.extend(&body);
-        out.extend(crc32(&body).to_be_bytes());
-    }
-    let mut raw = Vec::with_capacity((w * h * 3 + h) as usize);
-    for y in 0..h {
-        raw.push(0); // filtro nenhum
-        for x in 0..w {
-            let p = bgra[(y * w + x) as usize];
-            raw.extend([(p >> 16) as u8, (p >> 8) as u8, p as u8]);
-        }
-    }
-    let mut z = vec![0x78, 0x01];
-    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
-    for (i, b) in blocks.iter().enumerate() {
-        z.push((i + 1 == blocks.len()) as u8);
-        z.extend((b.len() as u16).to_le_bytes());
-        z.extend((!(b.len() as u16)).to_le_bytes());
-        z.extend(*b);
-    }
-    let (mut a, mut b) = (1u32, 0u32);
-    for &v in &raw {
-        a = (a + v as u32) % 65521;
-        b = (b + a) % 65521;
-    }
-    z.extend(((b << 16) | a).to_be_bytes());
-    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
-    let mut ihdr = Vec::new();
-    ihdr.extend((w as u32).to_be_bytes());
-    ihdr.extend((h as u32).to_be_bytes());
-    ihdr.extend([8, 2, 0, 0, 0]);
-    chunk(&mut out, b"IHDR", &ihdr);
-    chunk(&mut out, b"IDAT", &z);
-    chunk(&mut out, b"IEND", &[]);
-    std::fs::write(path, out).unwrap();
+    std::fs::write(path, crate::png::encode(w as usize, h as usize, bgra)).unwrap();
 }
 
 /// Uma "janela de programa" genérica para o desenho ter onde ficar.
@@ -84,13 +37,20 @@ fn fake_desktop(w: i32, h: i32) -> Vec<u32> {
 }
 
 fn stroke(tool: Tool, rgb: u32, r: f32, pts: Vec<(f32, f32)>) -> Stroke {
-    Stroke { tool, rgb, alpha: if tool == Tool::Marker { 90 } else { 255 }, pts: pts.into_iter().map(|(x, y)| [x, y, r]).collect() }
+    Stroke { tool, rgb, alpha: if tool == Tool::Marker { 90 } else { 255 }, pts: pts.into_iter().map(|(x, y)| [x, y, r]).collect(), num: 0, text: None, area: Default::default() }
+}
+
+/// Caixa de texto pronta, como a ferramenta T deixa.
+fn text(x: f32, y: f32, s: &str, rgb: u32) -> Stroke {
+    let f = crate::texto::Font::new(crate::texto::font_px(4.0)).unwrap();
+    let mask = f.render(s, 2000).mask;
+    Stroke { tool: Tool::Text, rgb, alpha: 255, pts: vec![[x, y, 0.0]], num: 0, text: Some(std::sync::Arc::new(mask)), area: Default::default() }
 }
 
 fn bar_pixels(s: f32, tool: Tool, rgb: u32, draw: bool, hover: Option<Item>) -> (toolbar::Layout, Vec<u32>) {
     let l = toolbar::layout(s);
     let mut buf = vec![0u32; (l.w * l.h) as usize];
-    let st = toolbar::State { draw, tool, rgb, size: 4.0, hidden: false, hover, can_undo: true, can_redo: false, colors: &COLORS };
+    let st = toolbar::State { draw, tool, rgb, size: 4.0, hidden: false, guides: false, fade: false, hover, can_undo: true, can_redo: false, rec: false, colors: &COLORS };
     toolbar::paint(&l, &st, &mut buf);
     (l, buf)
 }
@@ -128,6 +88,10 @@ fn imagens() {
         stroke(Tool::Arrow, COLORS[0], 3.0, vec![(560.0, 470.0), (745.0, 360.0)]),
         stroke(Tool::Ellipse, COLORS[5], 2.5, vec![(185.0, 255.0), (450.0, 345.0)]),
         stroke(Tool::Pen, COLORS[0], 2.5, wave),
+        Stroke::marker(210.0, 205.0, 4.0, 1, COLORS[0]),
+        Stroke::marker(730.0, 330.0, 4.0, 2, COLORS[0]),
+        Stroke::marker(1170.0, 215.0, 4.0, 3, COLORS[0]),
+        text(420.0, 478.0, "clique aqui", COLORS[0]),
     ] {
         let r = c.raster_stroke(&layer, &s);
         c.compose(&mut layer, r, s.rgb, s.alpha);
@@ -165,4 +129,20 @@ fn icone() {
         }
     }
     png("target/icone.png", w, h, &img);
+}
+
+/// Prévia dos marcadores 0-9, 10, 12, 99 e 100 em `target/marcadores.png`.
+#[test]
+#[ignore]
+fn marcadores() {
+    let (w, h) = (14 * 70, 80);
+    let mut c = Canvas::new(w, h);
+    let mut out = vec![0xFF202428u32; (w * h) as usize];
+    for (k, n) in [0u16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 99, 100].into_iter().enumerate() {
+        let s = Stroke::marker(35.0 + k as f32 * 70.0, 40.0, 4.0, n, COLORS[7]);
+        let r = c.raster_stroke(&out, &s);
+        c.compose(&mut out, r, s.rgb, s.alpha);
+        c.end_live();
+    }
+    png("target/marcadores.png", w, h, &out);
 }

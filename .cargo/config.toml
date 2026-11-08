@@ -1,0 +1,3 @@
+# Erros do crate windows sem IErrorInfo (só o HRESULT): menos exe e sem oleaut32.
+[build]
+rustflags = ["--cfg", "windows_slim_errors"]
