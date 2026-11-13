@@ -67,7 +67,7 @@ Escolher uma ferramenta ou uma cor liga o modo desenho. Passe o mouse em cima de
 | `Ctrl+Shift+X` | Apaga tudo |
 | `Ctrl+Shift+S` | Salva print da tela com as anotações |
 | `Ctrl+Shift+A` | Print de uma área: arraste um retângulo |
-| `Ctrl+Shift+R` | Começa / para a gravação de vídeo |
+| `Ctrl+Shift+F` | Começa / para a gravação de vídeo |
 | `Ctrl+Shift+B` | Barra transparente longe do mouse: liga / desliga |
 | `Ctrl+Shift+Q` | Fecha o Rabisco |
 
@@ -109,7 +109,7 @@ A barra não entra no print; as guias entram, se estiverem ligadas.
 - **Zoom (`Z`):** lupa 2x em volta do cursor; a roda vai de 1,5x a 4x. A lupa não aparece em gravação nem em compartilhamento de tela.
 
 ### Gravar a tela em vídeo
-O botão ● da barra (ou a bandeja) abre o menu: **Gravar o monitor**, **Gravar uma janela** (clique nela), **Gravar uma região** (arraste), **Som do sistema** e **Microfone**. `Ctrl+Shift+R` grava do último jeito escolhido e para a gravação.
+O botão ● da barra (ou a bandeja) abre o menu: **Gravar o monitor**, **Gravar uma janela** (clique nela), **Gravar uma região** (arraste), **Som do sistema** e **Microfone**. `Ctrl+Shift+F` grava do último jeito escolhido e para a gravação.
 - Escolhendo a janela ou a região, o resto da tela escurece e uma etiqueta mostra o nome da janela e o tamanho em pixels.
 - Enquanto grava, uma moldura vermelha cerca o que está sendo gravado e uma etiqueta "REC mm:ss" fica no canto. Nada disso sai no vídeo, nem a barra.
 - O vídeo vai para `Vídeos\Rabisco\rabisco_AAAA-MM-DD_HHhMMmSS.mp4` (H.264, 30 quadros por segundo).

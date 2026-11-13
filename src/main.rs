@@ -1306,7 +1306,7 @@ impl App {
 
     // ---------- gravação ----------
 
-    /// Ctrl+Shift+R e o ■: gravando, para; senão grava o modo salvo (janela e
+    /// Ctrl+Shift+F e o ■: gravando, para; senão grava o modo salvo (janela e
     /// região são escolhidas antes). Durante a escolha, cancela.
     fn toggle_record(&mut self) {
         if self.pick.is_some() {
@@ -1335,15 +1335,15 @@ impl App {
     fn rec_entries(&self, v: &mut Vec<bandeja::Entry<'static>>) {
         use bandeja::Entry::{Item as It, Sep};
         if matches!(self.rec, gravar::State::Recording | gravar::State::Stopping) {
-            v.push(It { id: MENU_REC_STOP, text: "Parar a gravação\tCtrl+Shift+R", checked: false });
+            v.push(It { id: MENU_REC_STOP, text: "Parar a gravação\tCtrl+Shift+F", checked: false });
             return;
         }
         let p = self.rec_prefs;
-        // O modo marcado é o do Ctrl+Shift+R.
+        // O modo marcado é o do Ctrl+Shift+F.
         let modes = [
-            (MENU_REC_MON, gravar::Pick::Monitor, "Gravar o monitor\tCtrl+Shift+R", "Gravar o monitor"),
-            (MENU_REC_WIN, gravar::Pick::Window, "Gravar uma janela (clique nela)\tCtrl+Shift+R", "Gravar uma janela (clique nela)"),
-            (MENU_REC_REG, gravar::Pick::Region, "Gravar uma região (arraste)\tCtrl+Shift+R", "Gravar uma região (arraste)"),
+            (MENU_REC_MON, gravar::Pick::Monitor, "Gravar o monitor\tCtrl+Shift+F", "Gravar o monitor"),
+            (MENU_REC_WIN, gravar::Pick::Window, "Gravar uma janela (clique nela)\tCtrl+Shift+F", "Gravar uma janela (clique nela)"),
+            (MENU_REC_REG, gravar::Pick::Region, "Gravar uma região (arraste)\tCtrl+Shift+F", "Gravar uma região (arraste)"),
         ];
         for (id, pick, with_key, plain) in modes {
             v.push(It { id, text: if p.pick == pick { with_key } else { plain }, checked: p.pick == pick });
@@ -2711,7 +2711,7 @@ unsafe fn perf_memoria(file: &str) {
         out += &format!("{name} {ws} {private}\n");
     };
     mark("mouse_parado");
-    // Gravação (Ctrl+Shift+R): o motor roda em outro processo, então este não
+    // Gravação (Ctrl+Shift+F): o motor roda em outro processo, então este não
     // pode crescer nem gravando nem depois (logo depois do "mouse_parado", que
     // é o estado mais estável: o privado varia ~10 KB entre execuções). O vídeo vai para uma pasta
     // temporária (o USERPROFILE do filho), não para os Vídeos do Rafa.
@@ -3119,7 +3119,7 @@ fn main() {
 
         let mods = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
         let mut failed = Vec::new();
-        for (id, vk, label) in [(HK_DRAW, 'D', "Ctrl+Shift+D"), (HK_HIDE, 'H', "Ctrl+Shift+H"), (HK_CLEAR, 'X', "Ctrl+Shift+X"), (HK_SAVE, 'S', "Ctrl+Shift+S"), (HK_REC, 'R', "Ctrl+Shift+R"), (HK_PRINT_REG, 'A', "Ctrl+Shift+A"), (HK_BAR, 'B', "Ctrl+Shift+B"), (HK_QUIT, 'Q', "Ctrl+Shift+Q")] {
+        for (id, vk, label) in [(HK_DRAW, 'D', "Ctrl+Shift+D"), (HK_HIDE, 'H', "Ctrl+Shift+H"), (HK_CLEAR, 'X', "Ctrl+Shift+X"), (HK_SAVE, 'S', "Ctrl+Shift+S"), (HK_REC, 'F', "Ctrl+Shift+F"), (HK_PRINT_REG, 'A', "Ctrl+Shift+A"), (HK_BAR, 'B', "Ctrl+Shift+B"), (HK_QUIT, 'Q', "Ctrl+Shift+Q")] {
             if RegisterHotKey(hwnd, id, mods, vk as u32) == 0 {
                 failed.push(label);
             }

@@ -328,7 +328,7 @@ pub fn mix(tracks: &mut [Track], upto: u64) -> Vec<i16> {
     out
 }
 
-/// O que o Ctrl+Shift+R grava (a última escolha do menu do botão Gravar).
+/// O que o Ctrl+Shift+F grava (a última escolha do menu do botão Gravar).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pick {
     Monitor,

@@ -159,7 +159,7 @@ pub fn label(item: Item) -> String {
         Item::Hide => "Esconder/mostrar desenhos (Ctrl+Shift+H)".into(),
         Item::Guides => "Guias (G): terços · 16:9 e área segura · terços no 16:9 · desligar".into(),
         Item::Save => "Salvar print com as anotações (Ctrl+S, ou Ctrl+Shift+S em qualquer programa)".into(),
-        Item::Rec => "Gravar vídeo (Ctrl+Shift+R): o menu escolhe monitor, janela ou região e o som · gravando, para".into(),
+        Item::Rec => "Gravar vídeo (Ctrl+Shift+F): o menu escolhe monitor, janela ou região e o som · gravando, para".into(),
         Item::Fade => "Fade (F): os traços novos somem sozinhos 3 s depois".into(),
         Item::Spot => "Holofote (S): escurece a tela menos em volta do cursor · roda muda o tamanho · Esc sai".into(),
         Item::Zoom => "Zoom (Z): lupa em volta do cursor · roda de 1,5x a 4x · Esc sai".into(),
