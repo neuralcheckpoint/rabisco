@@ -56,25 +56,16 @@
 Os oito atalhos de "Em qualquer programa" podem ser trocados. As teclas do modo desenho são fixas.
 
 1. Botão direito no ícone da bandeja → **Editar atalhos…**
-2. O Bloco de Notas abre o arquivo `atalhos.txt` com os atalhos atuais:
-
-   ```
-   desenhar = Ctrl+Shift+D
-   gravar = Ctrl+Shift+F
-   ...
-   ```
-
-3. Troque o que vem depois do `=`, salve e feche o Bloco de Notas. O Rabisco aplica na hora, sem reiniciar.
+2. Abre a janela **Atalhos do Rabisco**, com um campo por ação. Clique no campo e aperte o atalho novo. `Backspace` deixa a ação sem atalho, e **Padrões** volta todos ao original.
+3. Clique em **Salvar**. O Rabisco aplica na hora, sem reiniciar.
 
 | Pode usar | Exemplos |
 |---|---|
 | `Ctrl`, `Shift`, `Alt` e `Win` + uma letra, um número ou `F1` a `F24` | `Ctrl+Alt+D`, `Win+Shift+5`, `Ctrl+F9` |
 | `F1` a `F24` sozinhas | `F9` |
-| `nenhum` | desliga aquele atalho |
 
-- Letra ou número sem `Ctrl`, `Alt` ou `Win` não vale: roubaria a digitação em todos os programas.
-- Linha errada, ou atalho repetido em duas ações, é avisada ao aplicar e fica com o padrão (ou desligada, no caso da repetida).
-- Apagar o arquivo volta tudo ao padrão.
+- Letra ou número sem `Ctrl`, `Alt` ou `Win` não vale: roubaria a digitação em todos os programas. A janela avisa e não salva, e também avisa se duas ações ficarem com o mesmo atalho.
+- Se outro programa já usa o atalho escolhido, o Rabisco avisa ao salvar.
 - O menu da bandeja e as dicas da barra mostram sempre os atalhos atuais.
 
-O arquivo fica em `%APPDATA%\Rabisco\atalhos.txt`.
+Os atalhos ficam em `%APPDATA%\Rabisco\atalhos.txt`, um por linha (`gravar = Ctrl+Alt+R`; `nenhum` desliga). Dá para editar à mão, e apagar o arquivo volta tudo ao padrão. A janela não mostra a tecla `Win`: um atalho com `Win` só entra pelo arquivo, e continua valendo enquanto o campo dele não for mexido.

@@ -8,6 +8,7 @@
 //! dos traços (vetores).
 
 mod atalhos;
+mod atalhos_janela;
 mod bandeja;
 mod canvas;
 mod foco;
@@ -52,6 +53,8 @@ const HK_REC: i32 = 6;
 const HK_PICK_ESC: i32 = 7;
 const HK_PRINT_REG: i32 = 8;
 const HK_BAR: i32 = 9;
+/// Na ordem de `atalhos::ACTIONS`.
+const KEY_IDS: [i32; 8] = [HK_DRAW, HK_HIDE, HK_CLEAR, HK_SAVE, HK_PRINT_REG, HK_REC, HK_BAR, HK_QUIT];
 
 /// Outra cópia foi aberta (atalho do Iniciar): mostra a barra desta.
 const WM_SHOW_BAR: u32 = WM_APP + 2;
@@ -1281,10 +1284,9 @@ impl App {
 
     /// (Re)registra os atalhos globais do arquivo e avisa o que não deu.
     fn register_keys(&mut self) {
-        const IDS: [i32; 8] = [HK_DRAW, HK_HIDE, HK_CLEAR, HK_SAVE, HK_PRINT_REG, HK_REC, HK_BAR, HK_QUIT];
         let cfg = atalhos::load();
         let mut failed = Vec::new();
-        for (i, (id, key)) in IDS.into_iter().zip(cfg.keys).enumerate() {
+        for (i, (id, key)) in KEY_IDS.into_iter().zip(cfg.keys).enumerate() {
             unsafe { UnregisterHotKey(self.hwnd, id) };
             self.keys[i] = atalhos::label(key);
             if let Some(k) = key {
@@ -1312,15 +1314,12 @@ Esses atalhos não vão funcionar.", failed.join(", "));
         }
     }
 
-    /// Abre o arquivo de atalhos no Bloco de Notas; ao fechar, aplica.
+    /// Abre a janela de atalhos; ao fechar, ela manda WM_KEYS_EDITED, que registra de novo.
     fn edit_keys(&mut self) {
-        let Ok(path) = atalhos::ensure_file() else { return self.show_toast(false) };
-        let Ok(mut child) = std::process::Command::new("notepad.exe").arg(path).spawn() else { return self.show_toast(false) };
-        let hwnd = self.hwnd as usize;
-        std::thread::spawn(move || {
-            let _ = child.wait();
-            unsafe { PostMessageW(hwnd as HWND, WM_KEYS_EDITED, 0, 0) };
-        });
+        for id in KEY_IDS {
+            unsafe { UnregisterHotKey(self.hwnd, id) };
+        }
+        atalhos_janela::open(self.hwnd, self.tray_icon);
     }
 
     fn hotkey(&mut self, id: i32) {
@@ -3188,6 +3187,11 @@ fn main() {
 
         let mut msg: MSG = core::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            // Tab, Enter e Esc na janela de atalhos.
+            let keys_win = atalhos_janela::hwnd();
+            if !keys_win.is_null() && IsDialogMessageW(keys_win, &msg) != 0 {
+                continue;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

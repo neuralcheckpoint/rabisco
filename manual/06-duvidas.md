@@ -33,7 +33,7 @@ Botão direito no ícone da bandeja → desmarque **Abrir com o Windows**.
 | Prints | `Imagens\Rabisco` (e o último também em `Imagens\Rabisco\ultimo.png`) |
 | Vídeos | `Vídeos\Rabisco` |
 | Programa instalado | `%LOCALAPPDATA%\Programs\Rabisco` |
-| Atalhos | `%APPDATA%\Rabisco\atalhos.txt` (só existe depois do primeiro **Editar atalhos…**) |
+| Atalhos | `%APPDATA%\Rabisco\atalhos.txt` (só existe depois de salvar em **Editar atalhos…**) |
 | Escolhas (barra, gravação, som) | registro do Windows, só no seu usuário |
 
 ## Os desenhos aparecem no compartilhamento de tela?

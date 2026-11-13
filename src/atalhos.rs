@@ -48,25 +48,22 @@ pub fn load() -> Atalhos {
     parse(&std::fs::read_to_string(path()).unwrap_or_default())
 }
 
-/// Cria o arquivo com os valores atuais (se ainda não existe) e devolve o caminho.
-pub fn ensure_file() -> std::io::Result<PathBuf> {
+/// Grava os atalhos (a janela "Editar atalhos" chama ao salvar).
+pub fn save(keys: &[Option<Key>; 8]) -> std::io::Result<()> {
     let p = path();
-    if !p.exists() {
-        std::fs::create_dir_all(p.parent().unwrap())?;
-        std::fs::write(&p, template())?;
-    }
-    Ok(p)
+    std::fs::create_dir_all(p.parent().unwrap())?;
+    std::fs::write(&p, file_text(keys))
 }
 
-fn template() -> String {
+fn file_text(keys: &[Option<Key>; 8]) -> String {
     let mut s = String::from(
-        "# Atalhos do Rabisco, valem em qualquer programa.\r\n\
-         # Troque o que vem depois do =, salve e feche o Bloco de Notas: o Rabisco aplica na hora.\r\n\
+        "# Atalhos do Rabisco, valem em qualquer programa. O jeito fácil de mudar: bandeja > Editar atalhos.\r\n\
          # Teclas: Ctrl, Shift, Alt e Win + uma letra, um número ou F1 a F24 (ex.: Ctrl+Alt+D, F9).\r\n\
          # Letra ou número sem Ctrl/Alt/Win não vale. \"nenhum\" desliga o atalho.\r\n\r\n",
     );
-    for (name, def, what) in ACTIONS {
-        s += &format!("# {what}\r\n{name} = {def}\r\n\r\n");
+    for ((name, _, what), k) in ACTIONS.iter().zip(keys) {
+        let v = if k.is_some() { label(*k) } else { "nenhum".into() };
+        s += &format!("# {what}\r\n{name} = {v}\r\n\r\n");
     }
     s
 }
@@ -119,12 +116,17 @@ pub fn parse_key(s: &str) -> Option<Key> {
             _ => return None,
         });
     }
-    let vk = vk?;
-    // Letra/número sozinho (ou só com Shift) roubaria a digitação em todo programa.
-    if vk < 0x70 && mods & !4 == 0 {
-        return None;
+    Some(Key { mods, vk: vk? }).filter(|&k| valid(k))
+}
+
+/// Letra, número ou F1-F24; letra/número sozinho (ou só com Shift) roubaria a
+/// digitação em todo programa.
+pub fn valid(k: Key) -> bool {
+    match k.vk {
+        0x30..=0x39 | 0x41..=0x5A => k.mods & !4 != 0,
+        0x70..=0x87 => true,
+        _ => false,
     }
-    Some(Key { mods, vk })
 }
 
 /// Texto do atalho para menus e dicas ("" = desligado).
@@ -149,10 +151,13 @@ mod tests {
     }
 
     #[test]
-    fn modelo_le_igual_aos_padroes() {
-        let a = parse(&template());
+    fn arquivo_gravado_le_igual() {
+        let mut keys = parse("").keys;
+        keys[QUIT] = None;
+        keys[REC] = parse_key("Win+Alt+F12");
+        let a = parse(&file_text(&keys));
         assert!(a.bad.is_empty(), "{:?}", a.bad);
-        assert_eq!(a.keys, parse("").keys);
+        assert_eq!(a.keys, keys);
     }
 
     #[test]
@@ -168,6 +173,9 @@ mod tests {
         assert_eq!(parse_key("Shift+A"), None);
         assert_eq!(parse_key("Ctrl+A+B"), None);
         assert_eq!(parse_key("Win+1"), Some(Key { mods: 8, vk: b'1' as u32 }));
+        // Teclas que o campo da janela pode pegar mas o arquivo não guarda.
+        assert!(!valid(Key { mods: 2, vk: 0x61 })); // numpad 1
+        assert!(!valid(Key { mods: 2, vk: 0x25 })); // seta
     }
 
     #[test]

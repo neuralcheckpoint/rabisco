@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "rabisco"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "windows",
  "windows-sys",

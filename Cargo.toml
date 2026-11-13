@@ -1,6 +1,6 @@
 [package]
 name = "rabisco"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2024"
 description = "Anotar por cima da tela no Windows, estilo Epic Pen. Rust puro, Win32."
 license = "MIT"

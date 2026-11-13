@@ -30,7 +30,7 @@ holofote_mover_bytes = 0       # não aloca
 png_kb = 2_800                 # tamanho do PNG da tela de teste; hoje 2.637 KB
 
 [processo]
-exe_bytes = 567_296            # 0.4.8 (561.664): +19 KB dos atalhos configuráveis (arquivo, parser, menus montados na hora). Antes: 548.864, 0.4.6 (542.720): +5 KB de print de região, moldura e etiqueta GDI da gravação. Antes: 541.696, 0.4.0-a (500.736) + 40 KB, o teto do E2 (áudio, menu, escolha da janela e da região, contador). Antes: 504.000; ~492 KB; 500.736 (446.976 na 0.3.1: +52,5 KB da gravação: interfaces do crate windows, motor, --gravar e --gravar-teste). Antes: 440 KB; ~447.000 (430.592 na 0.3.0: +16 KB de fila do print, camada-base e faixas do fade, texto por linha)
+exe_bytes = 569_344            # 0.4.9 (568.320): +6,5 KB da janela de atalhos e do manifesto do comctl v6. Antes: 567.296, 0.4.8 (561.664): +19 KB dos atalhos configuráveis (arquivo, parser, menus montados na hora). Antes: 548.864, 0.4.6 (542.720): +5 KB de print de região, moldura e etiqueta GDI da gravação. Antes: 541.696, 0.4.0-a (500.736) + 40 KB, o teto do E2 (áudio, menu, escolha da janela e da região, contador). Antes: 504.000; ~492 KB; 500.736 (446.976 na 0.3.1: +52,5 KB da gravação: interfaces do crate windows, motor, --gravar e --gravar-teste). Antes: 440 KB; ~447.000 (430.592 na 0.3.0: +16 KB de fila do print, camada-base e faixas do fade, texto por linha)
 # Memória privada (KB) do rabisco.exe --perf-memoria em cada estado.
 memoria_mouse_parado_privado_kb = 2_048        # hoje 1.708-1.716 (antes do boot de 07/11 à tarde: 2.004-2.012, e o c12c0c7 igual: 2.000-2.052)
 # Em 2026-11-07 (tarde) o dcfc411 medido de novo deu 59.312 / 59.728 / 5.792 /
