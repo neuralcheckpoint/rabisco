@@ -25,6 +25,7 @@ target\release\rabisco.exe
 | `src/canvas.rs` | Traços, rasterização e composição |
 | `src/toolbar.rs` | Barra flutuante e ícones (desenhados em código, sem imagens) |
 | `src/bandeja.rs` | Ícone e menu da bandeja |
+| `src/atalhos.rs` | Arquivo `atalhos.txt` dos atalhos globais |
 | `src/instalar.rs` | Instalar, desinstalar e abrir com o Windows (tudo no usuário, sem administrador) |
 | `src/png.rs`, `src/imagens.rs` | Print e codificador PNG próprio |
 | `src/texto.rs`, `src/guias.rs`, `src/foco.rs` | Texto, guias, holofote e zoom |

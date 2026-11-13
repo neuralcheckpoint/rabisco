@@ -12,6 +12,8 @@ Os atalhos globais (`Ctrl+Shift+…`) só funcionam se nenhum outro programa já
 
 O contrário também acontece: enquanto o Rabisco está aberto, os atalhos dele valem em qualquer programa. Se algum programa seu usa `Ctrl+Shift+S`, `X` ou `B`, por exemplo, esse atalho passa a ir para o Rabisco.
 
+Nos dois casos, troque o atalho do Rabisco por outro, ou desligue: bandeja → **Editar atalhos…** ([Mudar os atalhos](05-atalhos.md#mudar-os-atalhos)).
+
 ## Não acho o ícone da bandeja
 
 No Windows 11, ele pode estar escondido na setinha `^` ao lado do relógio. Arraste-o para fora para deixá-lo sempre à vista.
@@ -31,6 +33,7 @@ Botão direito no ícone da bandeja → desmarque **Abrir com o Windows**.
 | Prints | `Imagens\Rabisco` (e o último também em `Imagens\Rabisco\ultimo.png`) |
 | Vídeos | `Vídeos\Rabisco` |
 | Programa instalado | `%LOCALAPPDATA%\Programs\Rabisco` |
+| Atalhos | `%APPDATA%\Rabisco\atalhos.txt` (só existe depois do primeiro **Editar atalhos…**) |
 | Escolhas (barra, gravação, som) | registro do Windows, só no seu usuário |
 
 ## Os desenhos aparecem no compartilhamento de tela?

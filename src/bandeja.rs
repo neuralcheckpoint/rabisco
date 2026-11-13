@@ -52,8 +52,8 @@ pub fn balloon(hwnd: HWND, title: &str, text: &str) {
     unsafe { Shell_NotifyIconW(NIM_MODIFY, &d) };
 }
 
-pub enum Entry<'a> {
-    Item { id: u32, text: &'a str, checked: bool },
+pub enum Entry {
+    Item { id: u32, text: String, checked: bool },
     Sep,
 }
 

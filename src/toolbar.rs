@@ -130,10 +130,13 @@ pub fn hit(l: &Layout, x: i32, y: i32) -> Option<Item> {
     l.items.iter().find(|(_, r)| r.contains(x, y)).map(|(i, _)| *i)
 }
 
-pub fn label(item: Item) -> String {
+/// `keys`: texto dos atalhos globais, na ordem de `atalhos::ACTIONS` ("" = desligado).
+pub fn label(item: Item, keys: &[String; 8]) -> String {
+    use crate::atalhos::{HIDE, QUIT, REC, SAVE};
+    let k = |i: usize| if keys[i].is_empty() { String::new() } else { format!(" ({})", keys[i]) };
     match item {
         Item::Grip => "Arraste para mover".into(),
-        Item::Close => "Guardar na bandeja · sair pelo ícone da bandeja (Ctrl+Shift+Q)".into(),
+        Item::Close => format!("Guardar na bandeja · sair pelo ícone da bandeja{}", k(QUIT)),
         Item::Mouse => "Mouse: clicar nos programas (Esc)".into(),
         Item::Tool(t) => match t {
             Tool::Pen => "Caneta (P)",
@@ -156,10 +159,13 @@ pub fn label(item: Item) -> String {
         Item::Undo => "Desfazer (Ctrl+Z)".into(),
         Item::Redo => "Refazer (Ctrl+Y)".into(),
         Item::Clear => "Apagar tudo (C)".into(),
-        Item::Hide => "Esconder/mostrar desenhos (Ctrl+Shift+H)".into(),
+        Item::Hide => format!("Esconder/mostrar desenhos{}", k(HIDE)),
         Item::Guides => "Guias (G): terços · 16:9 e área segura · terços no 16:9 · desligar".into(),
-        Item::Save => "Salvar print com as anotações (Ctrl+S, ou Ctrl+Shift+S em qualquer programa)".into(),
-        Item::Rec => "Gravar vídeo (Ctrl+Shift+F): o menu escolhe monitor, janela ou região e o som · gravando, para".into(),
+        Item::Save => match keys[SAVE].as_str() {
+            "" => "Salvar print com as anotações (Ctrl+S)".into(),
+            g => format!("Salvar print com as anotações (Ctrl+S, ou {g} em qualquer programa)"),
+        },
+        Item::Rec => format!("Gravar vídeo{}: o menu escolhe monitor, janela ou região e o som · gravando, para", k(REC)),
         Item::Fade => "Fade (F): os traços novos somem sozinhos 3 s depois".into(),
         Item::Spot => "Holofote (S): escurece a tela menos em volta do cursor · roda muda o tamanho · Esc sai".into(),
         Item::Zoom => "Zoom (Z): lupa em volta do cursor · roda de 1,5x a 4x · Esc sai".into(),

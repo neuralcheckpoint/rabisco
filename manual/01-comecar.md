@@ -7,7 +7,7 @@
 - [**Instalar-Rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Instalar-Rabisco.exe): o instalador. É o caminho normal.
 - [**rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/rabisco.exe): a versão portátil, que roda sem instalar (num pendrive, por exemplo).
 
-Os dois são o mesmo programa, de ~540 KB. Funcionam no Windows 10 e 11.
+Os dois são o mesmo programa, de ~550 KB. Funcionam no Windows 10 e 11.
 
 ## Instalar
 
@@ -46,7 +46,7 @@ Passe o mouse em cima de um botão para ver o nome e o atalho.
 O ícone do Rabisco fica ao lado do relógio. No Windows 11 ele pode estar escondido na setinha `^`: arraste-o para fora para deixar sempre à vista.
 
 - **Clique:** mostra ou guarda a barra.
-- **Botão direito:** desenhar, esconder os desenhos, apagar tudo, print, gravação, **Barra transparente**, **Abrir com o Windows** (liga e desliga) e sair.
+- **Botão direito:** desenhar, esconder os desenhos, apagar tudo, print, gravação, **Barra transparente**, **Abrir com o Windows** (liga e desliga), **Editar atalhos…** e sair.
 
 Abrir o Rabisco pelo Iniciar com ele já aberto só mostra a barra: ele nunca abre duas vezes.
 

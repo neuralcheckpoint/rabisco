@@ -7,6 +7,7 @@
 //! mostrando o que já recebeu. Para mudar algo depois, a DIB é refeita a partir
 //! dos traços (vetores).
 
+mod atalhos;
 mod bandeja;
 mod canvas;
 mod foco;
@@ -62,6 +63,8 @@ const WM_REC_STARTED: u32 = WM_APP + 4;
 const WM_REC_DONE: u32 = WM_APP + 5;
 /// Mouse durante a escolha (do gancho WH_MOUSE_LL): wp = 0 move, 1 aperta, 2 solta, 3 cancela.
 const WM_PICK: u32 = WM_APP + 6;
+/// O Bloco de Notas do "Editar atalhos" fechou: relê o arquivo.
+const WM_KEYS_EDITED: u32 = WM_APP + 7;
 const NIN_KEYSELECT: u32 = NIN_SELECT | NINF_KEY;
 
 const MENU_BAR: u32 = 1;
@@ -79,6 +82,7 @@ const MENU_REC_MIC: u32 = 12;
 const MENU_REC_STOP: u32 = 13;
 const MENU_BAR_FADE: u32 = 14;
 const MENU_PRINT_REG: u32 = 15;
+const MENU_KEYS: u32 = 16;
 
 const CF_DIB: u32 = 8;
 
@@ -340,6 +344,8 @@ struct App {
     rec_area: (i32, i32, i32, i32, i32),
     rec_t0: Option<std::time::Instant>,
     rec_prefs: gravar::Prefs,
+    /// Texto de cada atalho global, na ordem de `atalhos::ACTIONS` ("" = desligado).
+    keys: [String; 8],
     /// Escolha da janela ou da região em andamento.
     pick: Option<Picking>,
 }
@@ -1273,6 +1279,50 @@ impl App {
         }
     }
 
+    /// (Re)registra os atalhos globais do arquivo e avisa o que não deu.
+    fn register_keys(&mut self) {
+        const IDS: [i32; 8] = [HK_DRAW, HK_HIDE, HK_CLEAR, HK_SAVE, HK_PRINT_REG, HK_REC, HK_BAR, HK_QUIT];
+        let cfg = atalhos::load();
+        let mut failed = Vec::new();
+        for (i, (id, key)) in IDS.into_iter().zip(cfg.keys).enumerate() {
+            unsafe { UnregisterHotKey(self.hwnd, id) };
+            self.keys[i] = atalhos::label(key);
+            if let Some(k) = key {
+                if unsafe { RegisterHotKey(self.hwnd, id, k.mods | MOD_NOREPEAT, k.vk) } == 0 {
+                    failed.push(self.keys[i].clone());
+                    self.keys[i].clear();
+                }
+            }
+        }
+        let mut text = String::new();
+        if !failed.is_empty() {
+            text += &format!("Outro programa já usa: {}.
+Esses atalhos não vão funcionar.", failed.join(", "));
+        }
+        if !cfg.bad.is_empty() {
+            text += &format!("{}Não entendi estas linhas de {}:
+{}", if text.is_empty() { "" } else { "
+
+" }, atalhos::path().display(), cfg.bad.join("
+"));
+        }
+        if !text.is_empty() {
+            let (text, title) = (wide(&text), wide("Rabisco"));
+            unsafe { MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING) };
+        }
+    }
+
+    /// Abre o arquivo de atalhos no Bloco de Notas; ao fechar, aplica.
+    fn edit_keys(&mut self) {
+        let Ok(path) = atalhos::ensure_file() else { return self.show_toast(false) };
+        let Ok(mut child) = std::process::Command::new("notepad.exe").arg(path).spawn() else { return self.show_toast(false) };
+        let hwnd = self.hwnd as usize;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            unsafe { PostMessageW(hwnd as HWND, WM_KEYS_EDITED, 0, 0) };
+        });
+    }
+
     fn hotkey(&mut self, id: i32) {
         match id {
             HK_DRAW => self.set_draw(!self.draw),
@@ -1332,25 +1382,27 @@ impl App {
     }
 
     /// Itens de gravação do menu do botão Gravar e da bandeja.
-    fn rec_entries(&self, v: &mut Vec<bandeja::Entry<'static>>) {
+    fn rec_entries(&self, v: &mut Vec<bandeja::Entry>) {
         use bandeja::Entry::{Item as It, Sep};
+        let key = &self.keys[atalhos::REC];
         if matches!(self.rec, gravar::State::Recording | gravar::State::Stopping) {
-            v.push(It { id: MENU_REC_STOP, text: "Parar a gravação\tCtrl+Shift+F", checked: false });
+            v.push(It { id: MENU_REC_STOP, text: format!("Parar a gravação	{key}"), checked: false });
             return;
         }
         let p = self.rec_prefs;
-        // O modo marcado é o do Ctrl+Shift+F.
+        // O modo marcado é o do atalho de gravar.
         let modes = [
-            (MENU_REC_MON, gravar::Pick::Monitor, "Gravar o monitor\tCtrl+Shift+F", "Gravar o monitor"),
-            (MENU_REC_WIN, gravar::Pick::Window, "Gravar uma janela (clique nela)\tCtrl+Shift+F", "Gravar uma janela (clique nela)"),
-            (MENU_REC_REG, gravar::Pick::Region, "Gravar uma região (arraste)\tCtrl+Shift+F", "Gravar uma região (arraste)"),
+            (MENU_REC_MON, gravar::Pick::Monitor, "Gravar o monitor"),
+            (MENU_REC_WIN, gravar::Pick::Window, "Gravar uma janela (clique nela)"),
+            (MENU_REC_REG, gravar::Pick::Region, "Gravar uma região (arraste)"),
         ];
-        for (id, pick, with_key, plain) in modes {
-            v.push(It { id, text: if p.pick == pick { with_key } else { plain }, checked: p.pick == pick });
+        for (id, pick, text) in modes {
+            let text = if p.pick == pick { format!("{text}	{key}") } else { text.into() };
+            v.push(It { id, text, checked: p.pick == pick });
         }
         v.push(Sep);
-        v.push(It { id: MENU_REC_SYS, text: "Som do sistema", checked: p.system });
-        v.push(It { id: MENU_REC_MIC, text: "Microfone", checked: p.mic });
+        v.push(It { id: MENU_REC_SYS, text: "Som do sistema".into(), checked: p.system });
+        v.push(It { id: MENU_REC_MIC, text: "Microfone".into(), checked: p.mic });
     }
 
     /// Um item de gravação escolhido no menu: o modo fica salvo e começa; o som só fica salvo.
@@ -1668,17 +1720,26 @@ impl App {
             WM_CONTEXTMENU => {
                 use bandeja::Entry::{Item as It, Sep};
                 let auto = instalar::autostart();
+                let k = &self.keys;
                 let mut v = vec![
-                    It { id: MENU_BAR, text: if self.bar.shown { "Guardar a barra na bandeja" } else { "Mostrar a barra" }, checked: false },
-                    It { id: MENU_DRAW, text: "Desenhar\tCtrl+Shift+D", checked: self.draw },
-                    It { id: MENU_HIDE, text: "Esconder desenhos\tCtrl+Shift+H", checked: self.hidden },
-                    It { id: MENU_CLEAR, text: "Apagar tudo\tCtrl+Shift+X", checked: false },
-                    It { id: MENU_SAVE, text: "Salvar print\tCtrl+Shift+S", checked: false },
-                    It { id: MENU_PRINT_REG, text: "Print de uma região (arraste)\tCtrl+Shift+A", checked: false },
+                    It { id: MENU_BAR, text: (if self.bar.shown { "Guardar a barra na bandeja" } else { "Mostrar a barra" }).into(), checked: false },
+                    It { id: MENU_DRAW, text: format!("Desenhar	{}", k[atalhos::DRAW]), checked: self.draw },
+                    It { id: MENU_HIDE, text: format!("Esconder desenhos	{}", k[atalhos::HIDE]), checked: self.hidden },
+                    It { id: MENU_CLEAR, text: format!("Apagar tudo	{}", k[atalhos::CLEAR]), checked: false },
+                    It { id: MENU_SAVE, text: format!("Salvar print	{}", k[atalhos::SAVE]), checked: false },
+                    It { id: MENU_PRINT_REG, text: format!("Print de uma região (arraste)	{}", k[atalhos::PRINT_REG]), checked: false },
                     Sep,
                 ];
                 self.rec_entries(&mut v);
-                v.extend([Sep, It { id: MENU_BAR_FADE, text: "Barra transparente\tCtrl+Shift+B", checked: self.bar.faded }, It { id: MENU_AUTOSTART, text: "Abrir com o Windows", checked: auto }, Sep, It { id: MENU_QUIT, text: "Sair\tCtrl+Shift+Q", checked: false }]);
+                let k = &self.keys;
+                v.extend([
+                    Sep,
+                    It { id: MENU_BAR_FADE, text: format!("Barra transparente	{}", k[atalhos::BAR]), checked: self.bar.faded },
+                    It { id: MENU_AUTOSTART, text: "Abrir com o Windows".into(), checked: auto },
+                    It { id: MENU_KEYS, text: "Editar atalhos…".into(), checked: false },
+                    Sep,
+                    It { id: MENU_QUIT, text: format!("Sair	{}", k[atalhos::QUIT]), checked: false },
+                ]);
                 let id = bandeja::menu(self.hwnd, &v);
                 match id {
                     MENU_BAR => self.set_bar(!self.bar.shown),
@@ -1691,6 +1752,7 @@ impl App {
                         instalar::set_autostart(!auto);
                     }
                     MENU_BAR_FADE => self.toggle_bar_fade(),
+                    MENU_KEYS => self.edit_keys(),
                     MENU_QUIT => unsafe {
                         DestroyWindow(self.hwnd);
                     },
@@ -1707,7 +1769,7 @@ impl App {
         let Some(&(_, r)) = self.bar.layout.items.iter().find(|(i, _)| *i == item) else { return };
         let mut wr = RECT { left: 0, top: 0, right: 0, bottom: 0 };
         unsafe { GetWindowRect(self.bar.hwnd, &mut wr) };
-        self.bar.tip_text = wide(&toolbar::label(item));
+        self.bar.tip_text = wide(&toolbar::label(item, &self.keys));
         let mut ti = self.tool_info();
         ti.lpszText = self.bar.tip_text.as_mut_ptr();
         let (x, y) = (wr.right + 6, wr.top + r.y0 + 4);
@@ -2531,6 +2593,10 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
                 a.record_done();
                 0
             }
+            WM_KEYS_EDITED => {
+                a.register_keys();
+                0
+            }
             WM_SAVED => {
                 a.saved(*Box::from_raw(lp as *mut Saved));
                 0
@@ -3095,6 +3161,7 @@ fn main() {
             rec_area: (0, 0, 0, 0, 0),
             rec_t0: None,
             // O --perf-memoria não lê o registro: o padrão (monitor, som do sistema).
+            keys: atalhos::ACTIONS.map(|a| a.1.to_string()),
             rec_prefs: gravar::Prefs::from_bits(if perf { None } else { instalar::pref("Gravacao") }),
             pick: None,
         });
@@ -3117,17 +3184,7 @@ fn main() {
             bandeja::balloon(hwnd, "Rabisco instalado", "Ele abre com o Windows e fica aqui na bandeja. Clique no ícone para mostrar ou guardar a barra.");
         }
 
-        let mods = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
-        let mut failed = Vec::new();
-        for (id, vk, label) in [(HK_DRAW, 'D', "Ctrl+Shift+D"), (HK_HIDE, 'H', "Ctrl+Shift+H"), (HK_CLEAR, 'X', "Ctrl+Shift+X"), (HK_SAVE, 'S', "Ctrl+Shift+S"), (HK_REC, 'F', "Ctrl+Shift+F"), (HK_PRINT_REG, 'A', "Ctrl+Shift+A"), (HK_BAR, 'B', "Ctrl+Shift+B"), (HK_QUIT, 'Q', "Ctrl+Shift+Q")] {
-            if RegisterHotKey(hwnd, id, mods, vk as u32) == 0 {
-                failed.push(label);
-            }
-        }
-        if !failed.is_empty() {
-            let text = wide(&format!("Outro programa já usa: {}.\nEsses atalhos não vão funcionar.", failed.join(", ")));
-            MessageBoxW(null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING);
-        }
+        a.register_keys();
 
         let mut msg: MSG = core::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
