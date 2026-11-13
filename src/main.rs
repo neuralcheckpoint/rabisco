@@ -86,6 +86,10 @@ const MENU_REC_STOP: u32 = 13;
 const MENU_BAR_FADE: u32 = 14;
 const MENU_PRINT_REG: u32 = 15;
 const MENU_KEYS: u32 = 16;
+const MENU_BAR_HORIZ: u32 = 17;
+/// Limites do tamanho da barra, em %.
+const BAR_MIN: u32 = 60;
+const BAR_MAX: u32 = 200;
 
 const CF_DIB: u32 = 8;
 
@@ -237,6 +241,10 @@ struct Bar {
     near: bool,
     /// O ● foi apertado: o menu abre ao soltar o botão.
     rec_menu: bool,
+    /// Barra deitada.
+    horizontal: bool,
+    /// Tamanho da barra em % (Ctrl+roda nela), além do DPI.
+    scale: u32,
 }
 
 /// Caixa de texto aberta (ferramenta T). O texto fica em `App::live` como traço.
@@ -1649,14 +1657,38 @@ Esses atalhos não vão funcionar.", failed.join(", "));
         unsafe { GetWindowRect(self.bar.hwnd, &mut r) != 0 && GetCursorPos(&mut pt) != 0 && pt.x >= r.left && pt.x < r.right && pt.y >= r.top && pt.y < r.bottom }
     }
 
-    /// Recalcula a barra para o DPI do monitor onde ela está.
+    /// Recalcula a barra para o DPI do monitor onde ela está, a posição e o tamanho escolhidos.
     fn layout_bar(&mut self) {
         let dpi = unsafe { GetDpiForWindow(self.bar.hwnd) }.max(96);
-        self.bar.layout = toolbar::layout(dpi as f32 / 96.0);
+        self.bar.layout = toolbar::layout(dpi as f32 / 96.0 * self.bar.scale as f32 / 100.0, self.bar.horizontal);
         let l = &self.bar.layout;
         self.bar.surface = Surface::new(l.w, l.h);
-        unsafe { SetWindowPos(self.bar.hwnd, null_mut(), 0, 0, l.w, l.h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
+        // Cresce a partir do canto de cima à esquerda; se passar da tela, volta para dentro.
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetWindowRect(self.bar.hwnd, &mut r) };
+        let m = monitor_at(r.left, r.top);
+        let x = r.left.min(m.0 + m.2 - l.w).max(m.0);
+        let y = r.top.min(m.1 + m.3 - l.h).max(m.1);
+        unsafe { SetWindowPos(self.bar.hwnd, null_mut(), x, y, l.w, l.h, SWP_NOZORDER | SWP_NOACTIVATE) };
         self.paint_bar();
+    }
+
+    /// Ctrl+roda na barra: maior ou menor, de 10 em 10%.
+    fn resize_bar(&mut self, dir: i32) {
+        let scale = (self.bar.scale as i32 + dir * 10).clamp(BAR_MIN as i32, BAR_MAX as i32) as u32;
+        if scale != self.bar.scale {
+            self.bar.scale = scale;
+            instalar::set_pref("BarraTamanho", scale);
+            self.hide_tip();
+            self.layout_bar();
+        }
+    }
+
+    fn toggle_bar_horizontal(&mut self) {
+        self.bar.horizontal = !self.bar.horizontal;
+        instalar::set_pref("BarraHorizontal", self.bar.horizontal as u32);
+        self.hide_tip();
+        self.layout_bar();
     }
 
     fn bar_point(&self, sx: i32, sy: i32) -> (i32, i32) {
@@ -1734,6 +1766,7 @@ Esses atalhos não vão funcionar.", failed.join(", "));
                 v.extend([
                     Sep,
                     It { id: MENU_BAR_FADE, text: format!("Barra transparente	{}", k[atalhos::BAR]), checked: self.bar.faded },
+                    It { id: MENU_BAR_HORIZ, text: "Barra deitada".into(), checked: self.bar.horizontal },
                     It { id: MENU_AUTOSTART, text: "Abrir com o Windows".into(), checked: auto },
                     It { id: MENU_KEYS, text: "Editar atalhos…".into(), checked: false },
                     Sep,
@@ -1751,6 +1784,7 @@ Esses atalhos não vão funcionar.", failed.join(", "));
                         instalar::set_autostart(!auto);
                     }
                     MENU_BAR_FADE => self.toggle_bar_fade(),
+                    MENU_BAR_HORIZ => self.toggle_bar_horizontal(),
                     MENU_KEYS => self.edit_keys(),
                     MENU_QUIT => unsafe {
                         DestroyWindow(self.hwnd);
@@ -1771,9 +1805,15 @@ Esses atalhos não vão funcionar.", failed.join(", "));
         self.bar.tip_text = wide(&toolbar::label(item, &self.keys));
         let mut ti = self.tool_info();
         ti.lpszText = self.bar.tip_text.as_mut_ptr();
-        let (x, y) = (wr.right + 6, wr.top + r.y0 + 4);
-        // Barra encostada na direita da tela: dica do lado esquerdo.
-        let x = if x + 260 > self.ox + self.canvas.w { wr.left - 260 } else { x };
+        let (x, y) = if self.bar.horizontal {
+            // Deitada: dica embaixo do botão; encostada no pé da tela, em cima.
+            let y = wr.bottom + 6;
+            (wr.left + r.x0, if y + 40 > self.oy + self.canvas.h { wr.top - 40 } else { y })
+        } else {
+            let x = wr.right + 6;
+            // Barra encostada na direita da tela: dica do lado esquerdo.
+            (if x + 260 > self.ox + self.canvas.w { wr.left - 260 } else { x }, wr.top + r.y0 + 4)
+        };
         unsafe {
             SendMessageW(self.bar.tip, TTM_UPDATETIPTEXTW, 0, &ti as *const _ as LPARAM);
             SendMessageW(self.bar.tip, TTM_TRACKPOSITION, 0, (((y as u16 as u32) << 16) | x as u16 as u32) as LPARAM);
@@ -2715,7 +2755,13 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 0
             }
             WM_POINTERWHEEL | WM_MOUSEWHEEL => {
-                a.resize_pen(((wp >> 16) as u16 as i16).signum() as i32);
+                let dir = ((wp >> 16) as u16 as i16).signum() as i32;
+                // Async: a barra não tem o foco do teclado, o estado da thread pode estar velho.
+                if GetAsyncKeyState(VK_CONTROL as i32) < 0 {
+                    a.resize_bar(dir);
+                } else {
+                    a.resize_pen(dir);
+                }
                 0
             }
             WM_TIMER if wp == BAR_TIMER => {
@@ -3126,7 +3172,7 @@ fn main() {
             png_format: RegisterClipboardFormatW(wide("PNG").as_ptr()),
             bar: Bar {
                 hwnd: bar_hwnd,
-                layout: toolbar::layout(1.0),
+                layout: toolbar::layout(1.0, false),
                 surface: None,
                 hover: None,
                 tip,
@@ -3136,6 +3182,8 @@ fn main() {
                 faded: perf || instalar::pref("BarraTransparente").unwrap_or(1) != 0,
                 near: false,
                 rec_menu: false,
+                horizontal: !perf && instalar::pref("BarraHorizontal").unwrap_or(0) != 0,
+                scale: if perf { 100 } else { instalar::pref("BarraTamanho").unwrap_or(100).clamp(BAR_MIN, BAR_MAX) },
             },
             tray_icon: {
                 let n = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());

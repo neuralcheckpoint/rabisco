@@ -39,20 +39,26 @@ Passe o mouse em cima de um botão para ver o nome e o atalho.
 
 **Barra transparente:** longe do mouse, a barra fica quase invisível e volta ao normal quando o mouse passa em cima. `Ctrl+Shift+B` liga e desliga. Vem ligada.
 
+**Tamanho:** `Ctrl` + roda do mouse em cima da barra deixa ela maior ou menor (de 60% a 200%).
+
 <br clear="right">
+
+**Barra deitada:** botão direito no ícone da bandeja → **Barra deitada**. Os mesmos botões, numa faixa na horizontal, boa para encostar em cima ou embaixo da tela.
+
+<img src="../imagens/barra-deitada.png" alt="Barra deitada" width="500">
 
 ## A bandeja
 
 O ícone do Rabisco fica ao lado do relógio. No Windows 11 ele pode estar escondido na setinha `^`: arraste-o para fora para deixar sempre à vista.
 
 - **Clique:** mostra ou guarda a barra.
-- **Botão direito:** desenhar, esconder os desenhos, apagar tudo, print, gravação, **Barra transparente**, **Abrir com o Windows** (liga e desliga), **Editar atalhos…** e sair.
+- **Botão direito:** desenhar, esconder os desenhos, apagar tudo, print, gravação, **Barra transparente**, **Barra deitada**, **Abrir com o Windows** (liga e desliga), **Editar atalhos…** e sair.
 
 Abrir o Rabisco pelo Iniciar com ele já aberto só mostra a barra: ele nunca abre duas vezes.
 
 ## Atualizar
 
-Baixe o instalador novo e dê dois cliques. Ele fecha o Rabisco aberto, troca o programa e abre a versão nova. As suas escolhas (barra transparente, modo de gravação, som) ficam.
+Baixe o instalador novo e dê dois cliques. Ele fecha o Rabisco aberto, troca o programa e abre a versão nova. As suas escolhas (barra transparente, deitada e tamanho, modo de gravação, som) ficam.
 
 ## Desinstalar
 

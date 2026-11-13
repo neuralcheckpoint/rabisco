@@ -21,7 +21,7 @@ As teclas só valem no modo desenho. Segure **Shift** enquanto arrasta para trav
 ## Cores e espessura
 
 - **Cores:** 9 cores na barra, ou as teclas `1` a `9`. A escolhida ganha um anel.
-- **Espessura:** fino, médio, grosso e bem grosso na barra. A roda do mouse (no modo desenho ou em cima da barra) e as teclas `+` e `−` ajustam fino.
+- **Espessura:** fino, médio, grosso e bem grosso na barra. A roda do mouse (no modo desenho ou em cima da barra, sem `Ctrl`) e as teclas `+` e `−` ajustam fino.
 
 O cursor vira um círculo do tamanho e da cor do traço, para você ver onde vai cair.
 

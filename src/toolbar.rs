@@ -60,13 +60,15 @@ pub struct Layout {
     pub s: f32,
     pub items: Vec<(Item, Rect)>,
     seps: Vec<i32>,
+    /// Barra deitada: a mesma de pé, com x e y trocados.
+    pub horizontal: bool,
 }
 
 const W: f32 = 80.0;
 const PAD: f32 = 6.0;
 const INNER: f32 = W - 2.0 * PAD;
 
-pub fn layout(s: f32) -> Layout {
+pub fn layout(s: f32, horizontal: bool) -> Layout {
     let mut items = Vec::new();
     let mut seps = Vec::new();
     let px = |v: f32| (v * s).round() as i32;
@@ -122,7 +124,14 @@ pub fn layout(s: f32) -> Layout {
     put(Item::Save, PAD, y, half, 30.0);
     put(Item::Rec, PAD + half, y, half, 30.0);
     y += 30.0 + PAD;
-    Layout { w: px(W), h: px(y), s, items, seps }
+    let (w, h) = (px(W), px(y));
+    if horizontal {
+        for (_, r) in &mut items {
+            *r = Rect { x0: r.y0, y0: r.x0, x1: r.y1, y1: r.x1 };
+        }
+        return Layout { w: h, h: w, s, items, seps, horizontal };
+    }
+    Layout { w, h, s, items, seps, horizontal }
 }
 
 /// Botão em (x, y), em pixels da barra. `None` = fundo (arrasta a barra).
@@ -135,7 +144,7 @@ pub fn label(item: Item, keys: &[String; 8]) -> String {
     use crate::atalhos::{HIDE, QUIT, REC, SAVE};
     let k = |i: usize| if keys[i].is_empty() { String::new() } else { format!(" ({})", keys[i]) };
     match item {
-        Item::Grip => "Arraste para mover".into(),
+        Item::Grip => "Arraste para mover · Ctrl+roda do mouse muda o tamanho da barra".into(),
         Item::Close => format!("Guardar na bandeja · sair pelo ícone da bandeja{}", k(QUIT)),
         Item::Mouse => "Mouse: clicar nos programas (Esc)".into(),
         Item::Tool(t) => match t {
@@ -282,7 +291,8 @@ pub fn paint(l: &Layout, st: &State, buf: &mut [u32]) {
     let mut p = Painter { buf, mask: vec![0; (l.w * l.h) as usize], dirty: Rect::EMPTY, w: l.w, h: l.h };
     p.round_rect(Rect { x0: 0, y0: 0, x1: l.w, y1: l.h }, 10.0 * s, PANEL, 242, Some(EDGE));
     for &y in &l.seps {
-        let (a, b) = ([PAD * s + 4.0 * s, y as f32, 0.5 * s], [l.w as f32 - PAD * s - 4.0 * s, y as f32, 0.5 * s]);
+        let (y, (u0, u1)) = (y as f32, (PAD * s + 4.0 * s, W * s - PAD * s - 4.0 * s));
+        let (a, b) = if l.horizontal { ([y, u0, 0.5 * s], [y, u1, 0.5 * s]) } else { ([u0, y, 0.5 * s], [u1, y, 0.5 * s]) };
         p.seg(a, b);
         p.ink(EDGE);
     }
@@ -314,27 +324,27 @@ pub fn paint(l: &Layout, st: &State, buf: &mut [u32]) {
     }
 }
 
-/// Ícone do programa (bandeja, atalho), `n`x`n`, BGRA pré-multiplicado:
-/// quadrado escuro com a caneta da barra e um rabisco vermelho.
+/// Ícone do programa (bandeja, atalho), `n`x`n`, BGRA pré-multiplicado, no
+/// estilo do ícone do Rolo: quadrado quase preto, um traço branco grosso (um
+/// rabisco com uma volta) e um ponto dourado na ponta, onde a caneta está.
 pub fn app_icon(n: i32) -> Vec<u32> {
     let mut buf = vec![0u32; (n * n) as usize];
-    let s = n as f32 / 24.0;
+    let s = n as f32 / 64.0;
     let mut p = Painter { buf: &mut buf, mask: vec![0; (n * n) as usize], dirty: Rect::EMPTY, w: n, h: n };
-    p.round_rect(Rect { x0: 0, y0: 0, x1: n, y1: n }, 5.0 * s, PANEL, 255, None);
-    // Traço mais grosso que na barra para ler em 16 px.
-    let r = if n <= 24 { 1.6 } else { 1.3 };
-    let m = |u: f32, v: f32| -> Pt { [u * s, v * s, r * s] };
-    let pen = [(15.5, 3.5), (20.5, 8.5), (10.0, 19.0), (5.0, 19.0), (5.0, 14.0)];
-    for i in 0..pen.len() {
-        let (a, b) = (pen[i], pen[(i + 1) % pen.len()]);
-        p.seg(m(a.0, a.1), m(b.0, b.1));
+    p.round_rect(Rect { x0: 0, y0: 0, x1: n, y1: n }, 14.0 * s, 0x1A1A1A, 255, Some(0x3A3A3A));
+    // Traço mais grosso em 16-24 px para continuar lendo.
+    let r = if n <= 24 { 3.4 } else { 2.6 };
+    // Cicloide alongada: sobe, dá uma volta e desce, como um "l" de mão.
+    let pt = |t: f32| -> Pt { [(32.0 + 5.6 * t - 15.0 * t.sin()) * s, (30.0 - 14.0 * t.cos()) * s, r * s] };
+    let (t0, t1, steps) = (-3.1f32, 3.1f32, 64);
+    for i in 0..steps {
+        let (a, b) = (t0 + (t1 - t0) * i as f32 / steps as f32, t0 + (t1 - t0) * (i + 1) as f32 / steps as f32);
+        p.seg(pt(a), pt(b));
     }
-    p.ink(FG);
-    let wave = [(3.5, 21.5), (8.0, 20.5), (12.5, 21.5), (17.0, 20.5), (20.5, 21.0)];
-    for w in wave.windows(2) {
-        p.seg(m(w[0].0, w[0].1), m(w[1].0, w[1].1));
-    }
-    p.ink(0xE53935);
+    p.ink(0xEEEEEE);
+    let end = pt(t1);
+    p.seg([end[0], end[1], 5.0 * s], [end[0], end[1], 5.0 * s]);
+    p.ink(0xD6A64F);
     buf
 }
 
@@ -548,20 +558,24 @@ mod tests {
 
     #[test]
     fn layout_cabe_e_acha_os_botoes() {
-        let l = layout(1.0);
+        let l = layout(1.0, false);
         assert_eq!(l.w, 80);
         // 461 px a 100%: cabe com folga numa tela de 1080p a 150% (720 px úteis).
         assert!(l.h <= 470, "barra alta demais: {}", l.h);
-        for &(item, r) in &l.items {
-            assert!(r.x1 <= l.w && r.y1 <= l.h, "{item:?} fora da barra");
-            assert_eq!(hit(&l, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), Some(item));
+        let d = layout(1.0, true);
+        assert_eq!((d.w, d.h), (l.h, l.w));
+        for l in [l, d] {
+            for &(item, r) in &l.items {
+                assert!(r.x1 <= l.w && r.y1 <= l.h, "{item:?} fora da barra");
+                assert_eq!(hit(&l, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), Some(item));
+            }
+            assert_eq!(hit(&l, 1, 1), None); // canto = arrastar
         }
-        assert_eq!(hit(&l, 1, 1), None); // canto = arrastar
     }
 
     #[test]
     fn botao_gravar() {
-        let l = layout(1.0);
+        let l = layout(1.0, false);
         assert!(l.items.iter().any(|&(i, _)| i == Item::Rec));
         let colors = [0xFF0000u32; 9];
         let r = l.items.iter().find(|x| x.0 == Item::Rec).unwrap().1;
@@ -578,8 +592,8 @@ mod tests {
     #[test]
     fn pinta_sem_estourar() {
         let colors = [0xFF0000u32; 9];
-        for s in [1.0, 1.25, 1.5, 2.0] {
-            let l = layout(s);
+        for (s, h) in [(1.0, false), (1.25, true), (0.6, false), (2.0, true)] {
+            let l = layout(s, h);
             let mut buf = vec![0u32; (l.w * l.h) as usize];
             let st = State { draw: true, tool: Tool::Pen, rgb: 0xFF0000, size: 4.0, hidden: false, guides: true, fade: true, hover: Some(Item::Undo), can_undo: true, can_redo: false, rec: false, colors: &colors };
             paint(&l, &st, &mut buf);

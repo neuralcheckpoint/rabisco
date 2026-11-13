@@ -48,7 +48,11 @@ fn text(x: f32, y: f32, s: &str, rgb: u32) -> Stroke {
 }
 
 fn bar_pixels(s: f32, tool: Tool, rgb: u32, draw: bool, hover: Option<Item>) -> (toolbar::Layout, Vec<u32>) {
-    let l = toolbar::layout(s);
+    bar_pixels_at(s, false, tool, rgb, draw, hover)
+}
+
+fn bar_pixels_at(s: f32, horizontal: bool, tool: Tool, rgb: u32, draw: bool, hover: Option<Item>) -> (toolbar::Layout, Vec<u32>) {
+    let l = toolbar::layout(s, horizontal);
     let mut buf = vec![0u32; (l.w * l.h) as usize];
     let st = toolbar::State { draw, tool, rgb, size: 4.0, hidden: false, guides: false, fade: false, hover, can_undo: true, can_redo: false, rec: false, colors: &COLORS };
     toolbar::paint(&l, &st, &mut buf);
@@ -75,6 +79,13 @@ fn imagens() {
     let mut img = vec![0xFF2A2D33u32; (w * h) as usize];
     paste(&mut img, w, &bar, l.w, l.h, 40, 40);
     png("imagens/barra.png", w, h, &img);
+
+    // 1b. A barra deitada.
+    let (l, bar) = bar_pixels_at(1.5, true, Tool::Pen, COLORS[0], true, None);
+    let (w, h) = (l.w + 60, l.h + 60);
+    let mut img = vec![0xFF2A2D33u32; (w * h) as usize];
+    paste(&mut img, w, &bar, l.w, l.h, 30, 30);
+    png("imagens/barra-deitada.png", w, h, &img);
 
     // 2. Anotações por cima de um programa.
     let (w, h) = (1280, 720);
