@@ -53,8 +53,10 @@ const HK_REC: i32 = 6;
 const HK_PICK_ESC: i32 = 7;
 const HK_PRINT_REG: i32 = 8;
 const HK_BAR: i32 = 9;
+const HK_SPOT: i32 = 10;
+const HK_ZOOM: i32 = 11;
 /// Na ordem de `atalhos::ACTIONS`.
-const KEY_IDS: [i32; 8] = [HK_DRAW, HK_HIDE, HK_CLEAR, HK_SAVE, HK_PRINT_REG, HK_REC, HK_BAR, HK_QUIT];
+const KEY_IDS: [i32; atalhos::N] = [HK_DRAW, HK_HIDE, HK_CLEAR, HK_SAVE, HK_PRINT_REG, HK_REC, HK_BAR, HK_SPOT, HK_ZOOM, HK_QUIT];
 
 /// Outra cópia foi aberta (atalho do Iniciar): mostra a barra desta.
 const WM_SHOW_BAR: u32 = WM_APP + 2;
@@ -92,6 +94,9 @@ const BAR_MIN: u32 = 60;
 const BAR_MAX: u32 = 200;
 
 const CF_DIB: u32 = 8;
+const CF_UNICODETEXT: u32 = 13;
+/// Colar mais que isso numa caixa de texto não cabe na tela de qualquer jeito.
+const PASTE_MAX: usize = 4000;
 
 const TIP_TIMER: usize = 1;
 /// Parado no modo desenho por este tempo: solta a imagem da tela.
@@ -271,6 +276,9 @@ enum LookKind {
     Spot { d: i32, hole: Vec<u32>, at: Rect },
     /// `src`: pedaço da tela copiado antes de ampliar (lado = lupa / zoom).
     Zoom { src: Option<Surface> },
+    /// Zoom congelado (clique com a lupa): a área ampliada cobre o monitor, e
+    /// os traços vão por cima dela, numa lista à parte.
+    Frozen,
 }
 
 /// Holofote ou zoom: janela própria com WS_EX_TRANSPARENT por cima de tudo. O
@@ -300,6 +308,8 @@ struct App {
     rgb: u32,
     size: f32,
     draw: bool,
+    /// Quadro: fundo opaco no modo desenho (0 = tela de verdade por trás).
+    board: u32,
     hidden: bool,
     cursor: HCURSOR,
     /// Ponteiro que está desenhando agora.
@@ -333,6 +343,8 @@ struct App {
     fade: bool,
     text: Option<TextEdit>,
     look: Option<Look>,
+    /// Traços, desfazer e refazer da tela, guardados enquanto o zoom está congelado.
+    stash: Option<(Vec<Stroke>, Vec<Action>, Vec<Action>)>,
     /// Raio do holofote (0 = ainda não escolhido: 1/8 da altura do monitor).
     spot_r: f32,
     zoom: f32,
@@ -356,7 +368,7 @@ struct App {
     rec_t0: Option<std::time::Instant>,
     rec_prefs: gravar::Prefs,
     /// Texto de cada atalho global, na ordem de `atalhos::ACTIONS` ("" = desligado).
-    keys: [String; 8],
+    keys: [String; atalhos::N],
     /// Escolha da janela ou da região em andamento.
     pick: Option<Picking>,
 }
@@ -366,6 +378,19 @@ static mut APP: *mut App = null_mut();
 fn app() -> &'static mut App {
     // Só a thread da janela mexe aqui.
     unsafe { &mut *APP }
+}
+
+const BOARD_WHITE: u32 = 0xFFFF_FFFF;
+const BOARD_BLACK: u32 = 0xFF00_0000;
+
+/// Fundo da tela: nada no modo mouse (o clique passa), alfa 1 no modo
+/// desenho (pega o clique sem aparecer) ou o quadro opaco.
+fn floor_for(draw: bool, board: u32) -> u32 {
+    match (draw, board) {
+        (false, _) => 0,
+        (true, 0) => FLOOR,
+        (true, b) => b,
+    }
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -393,7 +418,24 @@ fn virtual_screen() -> (i32, i32, i32, i32) {
 
 impl App {
     fn floor(&self) -> u32 {
-        if self.draw { FLOOR } else { 0 }
+        floor_for(self.draw, self.board)
+    }
+
+    /// Quadro branco ou preto (`W` / `K`); a mesma tecla de novo volta à tela.
+    fn toggle_board(&mut self, color: u32) {
+        if !self.draw {
+            return;
+        }
+        self.board = if self.board == color { 0 } else { color };
+        // Refaz tudo: as bordas suaves dos traços misturam com o fundo.
+        if let Some(s) = self.surface.as_mut() {
+            let floor = floor_for(self.draw, self.board);
+            self.canvas.rebuild(s.pixels(), floor);
+        } else {
+            self.ensure_surface();
+        }
+        self.present_all();
+        self.paint_bar();
     }
 
     /// Tem algo na tela (traços fixos ou sumindo)?
@@ -530,14 +572,37 @@ impl App {
     /// Abre a caixa com o clique na altura do meio da primeira linha.
     fn text_open(&mut self, x: f32, y: f32) {
         let Some(font) = texto::Font::new(texto::font_px(self.size)) else { return };
-        let (mx, my, mw, mh) = cursor_monitor();
         let pad = texto::pad(font.px);
         let (x, y) = (x - pad as f32, y - (pad + font.line_h / 2) as f32);
+        self.text_box_open(x, y, font, texto::Editor::default());
+    }
+
+    /// Clicou num texto já confirmado com a ferramenta Texto: ele sai da lista
+    /// (desfazível) e volta a ser a caixa aberta, no mesmo lugar, fonte e cor.
+    fn text_reopen(&mut self, i: usize) {
+        let s = self.canvas.strokes.remove(i);
+        let m = s.text.clone().unwrap();
+        let Some(font) = texto::Font::new(m.px) else {
+            self.canvas.strokes.insert(i, s);
+            return;
+        };
+        let (x, y) = (s.pts[0][0], s.pts[0][1]);
+        let area = s.bbox(&mut self.scratch);
+        self.rgb = s.rgb;
+        self.push_action(Action::Erase(vec![(i, s)]));
+        self.redraw(Some(area));
+        self.text_box_open(x, y, font, texto::Editor::with(&m.src));
+    }
+
+    /// Abre a caixa com o canto em (x, y).
+    fn text_box_open(&mut self, x: f32, y: f32, font: texto::Font, editor: texto::Editor) {
+        let (mx, my, mw, mh) = cursor_monitor();
+        let pad = texto::pad(font.px);
         let max_w = ((mx + mw - self.ox) as f32 - x) as i32 - 8;
         // Uma linha cabe sempre, mesmo com o clique colado na borda de baixo.
         let max_h = (((my + mh - self.oy) as f32 - y) as i32).max(font.line_h + 2 * pad);
         let (max_w, laid) = (max_w.max(120), texto::Laid::default());
-        self.text = Some(TextEdit { editor: texto::Editor::default(), font, x, y, max_w, max_h, laid, caret: (0, 0), caret_on: true });
+        self.text = Some(TextEdit { editor, font, x, y, max_w, max_h, laid, caret: (0, 0), caret_on: true });
         self.text_update(true, true);
         self.arm_caret();
     }
@@ -550,8 +615,13 @@ impl App {
     }
 
     fn text_char(&mut self, u: u16) {
+        self.text_edit(|e, _| e.input(u));
+    }
+
+    /// Mexe no texto ou no cursor da caixa aberta; redesenha se algo mudou.
+    fn text_edit(&mut self, f: impl FnOnce(&mut texto::Editor, &[texto::Line]) -> bool) {
         let Some(ed) = self.text.as_mut() else { return };
-        if ed.editor.input(u) {
+        if f(&mut ed.editor, &ed.laid.lines) {
             ed.caret_on = true;
             self.text_update(true, true);
             self.arm_caret();
@@ -570,7 +640,7 @@ impl App {
             Some(l) if l.tool == Tool::Text => l,
             _ => {
                 ed.laid = texto::Laid::default();
-                let mask = canvas::TextMask { w: 0, h: 0, cov: Vec::new() };
+                let mask = canvas::TextMask::default();
                 Stroke { tool: Tool::Text, rgb: self.rgb, alpha: 255, pts: vec![[ed.x, ed.y, 0.0]], num: 0, text: Some(std::sync::Arc::new(mask)), area: Default::default() }
             }
         };
@@ -578,12 +648,15 @@ impl App {
         let mut from = ed.caret.1; // o cursor piscou: só a linha dele
         if gdi || live.text.as_ref().is_some_and(|m| m.w == 0) {
             let m = std::sync::Arc::make_mut(live.text.as_mut().unwrap());
-            (from, ed.caret) = ed.font.update(&ed.editor.text, ed.max_w, &mut ed.laid, m);
-            if m.h > ed.max_h && ed.editor.backspace() {
-                // Passou da borda de baixo do monitor: a tecla não entra.
-                let (f, caret) = ed.font.update(&ed.editor.text, ed.max_w, &mut ed.laid, m);
+            let old = ed.caret.1;
+            (from, ed.caret) = ed.font.update(&ed.editor.text, ed.editor.caret, ed.max_w, &mut ed.laid, m);
+            while m.h > ed.max_h && ed.editor.backspace() {
+                // Passou da borda de baixo do monitor: a tecla (ou o fim do colado) não entra.
+                let (f, caret) = ed.font.update(&ed.editor.text, ed.editor.caret, ed.max_w, &mut ed.laid, m);
                 (from, ed.caret) = (from.min(f), caret);
             }
+            // O cursor andou sem o texto mudar: a linha de onde ele saiu e a nova.
+            from = from.min(old).min(ed.caret.1);
         }
         live.rgb = self.rgb;
         let w = ed.font.caret_w() as f32 * 0.5;
@@ -651,8 +724,8 @@ impl App {
 
     /// S (holofote) ou Z (zoom): liga; a mesma tecla de novo desliga.
     fn toggle_look(&mut self, zoom: bool) {
-        let same = self.look.as_ref().is_some_and(|l| matches!(l.kind, LookKind::Zoom { .. }) == zoom);
-        self.look = None;
+        let same = self.look.as_ref().is_some_and(|l| matches!(l.kind, LookKind::Spot { .. }) != zoom);
+        self.close_look();
         if same {
             return;
         }
@@ -667,6 +740,53 @@ impl App {
         let mut pt = POINT { x: 0, y: 0 };
         unsafe { GetCursorPos(&mut pt) };
         self.look_open(zoom, pt.x, pt.y);
+    }
+
+    /// Fecha o holofote ou o zoom; saindo do zoom congelado, os traços da tela voltam.
+    fn close_look(&mut self) {
+        self.look = None;
+        if let Some((strokes, undo, redo)) = self.stash.take() {
+            self.canvas.strokes = strokes;
+            self.canvas.fading.clear();
+            (self.undo, self.redo) = (undo, redo);
+            self.redraw_all();
+        }
+    }
+
+    /// Clique com a lupa aberta: congela a área ampliada no monitor inteiro
+    /// para desenhar por cima (como o ZoomIt). Os traços da tela já saem
+    /// ampliados na imagem e ficam guardados até sair do zoom.
+    fn zoom_freeze(&mut self) {
+        let mut pt = POINT { x: 0, y: 0 };
+        unsafe { GetCursorPos(&mut pt) };
+        let mon = monitor_at(pt.x, pt.y);
+        let (sx, sy, sw, sh) = foco::zoom_src(pt.x, pt.y, mon.2, mon.3, self.zoom, mon);
+        let Some(l) = self.look.as_mut() else { return };
+        let (Some(src), Some(big)) = (Surface::new(sw, sh), Surface::new(mon.2, mon.3)) else { return };
+        unsafe {
+            // A lupa está fora da captura: a cópia pega só a tela e as anotações.
+            let screen = GetDC(null_mut());
+            BitBlt(src.dc, 0, 0, sw, sh, screen, sx, sy, SRCCOPY | CAPTUREBLT);
+            ReleaseDC(null_mut(), screen);
+            SetStretchBltMode(big.dc, COLORONCOLOR);
+            StretchBlt(big.dc, 0, 0, mon.2, mon.3, src.dc, 0, 0, sw, sh, SRCCOPY);
+            GdiFlush();
+            // Congelado é para mostrar: aparece no compartilhamento, no print e no vídeo.
+            SetWindowDisplayAffinity(l.hwnd, WDA_NONE);
+        }
+        big.present_opaque(l.hwnd, Some((mon.0, mon.1)));
+        (l.surface, l.mon, l.kind) = (big, mon, LookKind::Frozen);
+        unsafe {
+            // Os traços e a barra ficam por cima da imagem congelada.
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+            SetWindowPos(self.bar.hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+        }
+        self.zoom_at = None;
+        let strokes = std::mem::take(&mut self.canvas.strokes);
+        self.stash = Some((strokes, std::mem::take(&mut self.undo), std::mem::take(&mut self.redo)));
+        self.canvas.fading.clear();
+        self.redraw_all();
     }
 
     fn look_open(&mut self, zoom: bool, x: i32, y: i32) {
@@ -776,6 +896,7 @@ impl App {
                 }
                 l.surface.present_opaque(l.hwnd, Some((x - lw / 2, y - lh / 2)));
             }
+            LookKind::Frozen => {}
         }
     }
 
@@ -791,6 +912,7 @@ impl App {
                 (*d, *hole) = foco::hole(self.spot_r);
             }
             LookKind::Zoom { .. } => self.zoom = foco::step_zoom(self.zoom, dir),
+            LookKind::Frozen => return self.resize_pen(dir),
         }
         self.look_move(pt.x, pt.y);
     }
@@ -813,7 +935,11 @@ impl App {
         }
         if !on {
             self.finish();
-            self.look = None;
+            self.close_look();
+            if self.board != 0 {
+                self.board = 0; // o quadro é só do modo desenho
+                self.surface = None;
+            }
         }
         self.draw = on;
         if on {
@@ -863,7 +989,7 @@ impl App {
     /// Monitores mudaram: os traços ficam no mesmo lugar da tela.
     fn display_changed(&mut self) {
         self.finish();
-        self.look = None;
+        self.close_look();
         let (ox, oy, w, h) = virtual_screen();
         let (dx, dy) = ((self.ox - ox) as f32, (self.oy - oy) as f32);
         let mut strokes = std::mem::take(&mut self.canvas.strokes);
@@ -1006,7 +1132,7 @@ impl App {
 
     fn pointer_down(&mut self, id: u32) {
         if self.look.as_ref().is_some_and(|l| matches!(l.kind, LookKind::Zoom { .. })) {
-            return; // a lupa cobre o lugar do traço
+            return self.zoom_freeze(); // a lupa cobre o lugar do traço: o clique congela
         }
         if self.text.is_some() {
             // Caixa aberta: clicar dentro não faz nada; fora confirma o texto (e só).
@@ -1023,7 +1149,12 @@ impl App {
         self.read_samples(id);
         let Some(s) = self.samples.pop() else { return };
         if self.tool == Tool::Text && !s.eraser {
-            self.text_open(s.x, s.y);
+            let (x, y) = (s.x as i32, s.y as i32);
+            let hit = self.canvas.strokes.iter().rposition(|t| t.text.as_ref().is_some_and(|m| !m.src.is_empty()) && t.text_box().is_some_and(|b| b.contains(x, y)));
+            match hit {
+                Some(i) => self.text_reopen(i),
+                None => self.text_open(s.x, s.y),
+            }
             return;
         }
         self.pointer = Some(id);
@@ -1086,7 +1217,12 @@ impl App {
             let last = *live.pts.last().unwrap();
             if (pt[0] - last[0]).hypot(pt[1] - last[1]) >= 0.75 {
                 live.pts.push(pt);
-                let r = self.canvas.raster_seg(px, last, pt);
+                // A curva até o meio do trecho anterior; o resto sai no próximo ponto (ou ao soltar).
+                canvas::freehand_piece(&live.pts, live.pts.len() - 2, &mut self.scratch);
+                let mut r = Rect::EMPTY;
+                for (a, b) in self.scratch.drain(..) {
+                    r = r.union(&self.canvas.raster_seg(px, a, b));
+                }
                 self.canvas.compose(px, r, live.rgb, live.alpha);
                 self.live_box = self.live_box.union(&r);
                 self.live = Some(live);
@@ -1150,6 +1286,17 @@ impl App {
                 self.present(r);
             }
         } else {
+            let n = live.pts.len();
+            if live.tool.is_freehand() && n > 1 {
+                // O pedaço final, do meio do último trecho até a ponta.
+                if let Some(px) = self.surface.as_mut().map(|s| s.pixels()) {
+                    canvas::freehand_piece(&live.pts, n - 1, &mut self.scratch);
+                    let (a, b) = self.scratch.pop().unwrap();
+                    let r = self.canvas.raster_seg(px, a, b);
+                    self.canvas.compose(px, r, live.rgb, live.alpha);
+                    self.present(r);
+                }
+            }
             self.canvas.end_live();
             self.commit(live);
         }
@@ -1251,14 +1398,31 @@ impl App {
             // teclas de ferramenta não disparam. Esc confirma; Ctrl+algo confirma
             // e segue o atalho. AltGr é Ctrl+Alt no ABNT2: é letra, não atalho.
             let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+            let mv = match vk {
+                VK_LEFT => Some(texto::Move::Left),
+                VK_RIGHT => Some(texto::Move::Right),
+                VK_UP => Some(texto::Move::Up),
+                VK_DOWN => Some(texto::Move::Down),
+                VK_HOME => Some(texto::Move::Home),
+                VK_END => Some(texto::Move::End),
+                _ => None,
+            };
             match vk {
                 VK_ESCAPE => return self.finish(),
+                _ if mv.is_some() => return self.text_edit(|e, l| e.move_caret(mv.unwrap(), l)),
+                VK_DELETE => return self.text_edit(|e, _| e.delete()),
+                0x56 if ctrl && !alt => {
+                    // Ctrl+V: cola o texto da área de transferência no cursor.
+                    let Some(t) = clipboard_text(self.hwnd) else { return };
+                    let t: String = t.chars().take(PASTE_MAX).collect();
+                    return self.text_edit(|e, _| e.insert(&t));
+                }
                 _ if ctrl && !alt => self.finish(),
                 _ => return,
             }
         }
         if self.look.is_some() && vk == VK_ESCAPE {
-            self.look = None;
+            self.close_look();
             return;
         }
         match vk {
@@ -1279,6 +1443,8 @@ impl App {
             0x54 => self.set_tool(Tool::Text),    // T
             0x47 => self.cycle_guides(),          // G
             0x46 => self.toggle_fade(),           // F
+            0x57 => self.toggle_board(BOARD_WHITE), // W
+            0x4B => self.toggle_board(BOARD_BLACK), // K
             0x53 if ctrl => self.save_print(),    // Ctrl+S
             0x53 => self.toggle_look(false),      // S: holofote
             0x5A => self.toggle_look(true),       // Z: zoom
@@ -1345,6 +1511,8 @@ Esses atalhos não vão funcionar.", failed.join(", "));
             }
             HK_REC => self.toggle_record(),
             HK_PRINT_REG => self.print_region(),
+            HK_SPOT => self.toggle_look(false),
+            HK_ZOOM => self.toggle_look(true),
             HK_BAR => {
                 // Guardada na bandeja: só aparece. Visível: liga/desliga a transparência.
                 if self.bar.shown {
@@ -2432,6 +2600,26 @@ fn global_copy(bytes: &[u8]) -> HANDLE {
     }
 }
 
+/// Texto da área de transferência (None se não tem texto).
+fn clipboard_text(hwnd: HWND) -> Option<String> {
+    unsafe {
+        if OpenClipboard(hwnd) == 0 {
+            return None;
+        }
+        let h = GetClipboardData(CF_UNICODETEXT);
+        let p = if h.is_null() { null_mut() } else { GlobalLock(h) as *const u16 };
+        let out = (!p.is_null()).then(|| {
+            let n = (0..GlobalSize(h) / 2).take_while(|&i| *p.add(i) != 0).count();
+            String::from_utf16_lossy(core::slice::from_raw_parts(p, n))
+        });
+        if !p.is_null() {
+            GlobalUnlock(h);
+        }
+        CloseClipboard();
+        out
+    }
+}
+
 /// CF_DIB (32 bits, de baixo para cima) a partir do PNG guardado.
 fn dib_from_png(png: &[u8]) -> HANDLE {
     let Some((w, h, px)) = png::decode(png) else { return null_mut() };
@@ -3152,6 +3340,7 @@ fn main() {
             rgb: COLORS[0],
             size: 4.0,
             draw: false,
+            board: 0,
             hidden: false,
             cursor: null_mut(),
             pointer: None,
@@ -3194,6 +3383,7 @@ fn main() {
             fade: false,
             text: None,
             look: None,
+            stash: None,
             spot_r: 0.0,
             zoom: 2.0,
             rec: gravar::State::Idle,
@@ -3249,6 +3439,21 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quadro_fica_opaco_por_baixo_do_traco() {
+        assert_eq!(floor_for(false, BOARD_WHITE), 0); // modo mouse: clique passa
+        assert_eq!(floor_for(true, 0), FLOOR);
+        let mut c = Canvas::new(100, 60);
+        c.strokes.push(Stroke { tool: Tool::Pen, rgb: 0xFF0000, alpha: 255, pts: vec![[10.0, 30.0, 4.0], [90.0, 30.0, 4.0]], num: 0, text: None, area: Default::default() });
+        for board in [BOARD_WHITE, BOARD_BLACK] {
+            let mut out = vec![0; c.len()];
+            c.rebuild(&mut out, floor_for(true, board));
+            assert_eq!(out[5 * 100 + 5], board, "fundo");
+            assert_eq!(out[30 * 100 + 50], 0xFFFF0000, "traço");
+            assert!(out.iter().all(|p| p >> 24 == 0xFF), "nenhum pixel deixa a tela aparecer");
+        }
+    }
 
     #[test]
     fn nome_do_arquivo_com_data_e_hora() {

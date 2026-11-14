@@ -165,13 +165,13 @@ fn medir_pesados(l: &mut Vec<Linha>) {
     let mut frase = "Banding na borda do céu ".repeat(84);
     let (mut laid, mut c) = (texto::Laid::default(), Canvas::new(W, H));
     let mut out = vec![FLOOR; c.len()];
-    let mask = canvas::TextMask { w: 0, h: 0, cov: Vec::new() };
+    let mask = canvas::TextMask::default();
     let mut s = Stroke { tool: Tool::Text, rgb: 0xFFFFFF, alpha: 255, pts: vec![[600.0, 400.0, 0.0]], num: 0, text: Some(std::sync::Arc::new(mask)), area: Default::default() };
     let mut n = 0;
     l.push(resumo("texto_2000_tecla", "ms", tempos(3, 60, || {
         n += 1;
         frase.push(if n % 7 == 0 { ' ' } else { 'a' });
-        let (from, _) = font.update(&frase, 3000, &mut laid, std::sync::Arc::make_mut(s.text.as_mut().unwrap()));
+        let (from, _) = font.update(&frase, frase.len(), 3000, &mut laid, std::sync::Arc::make_mut(s.text.as_mut().unwrap()));
         let y = 400 + from;
         c.clear_live_from(y);
         let r = c.raster_stroke_from(&out, &s, y);

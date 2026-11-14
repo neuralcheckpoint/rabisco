@@ -20,9 +20,10 @@ Tecla `T`. Clique onde o texto começa e digite. Usa a cor atual, e o tamanho se
 - A linha que chega na borda do monitor quebra sozinha, antes da palavra que não cabe.
 - `Esc` ou clicar fora confirma. Caixa vazia some.
 - Com a caixa aberta, as letras são texto: `P`, `M`, `E` não trocam de ferramenta. `Ctrl+Z` e os outros atalhos com Ctrl confirmam o texto e seguem.
+- As setas, `Home` e `End` andam com o cursor dentro do texto; `Delete` apaga a letra da frente.
+- `Ctrl+V` cola o texto copiado de outro programa no lugar do cursor.
 - Cada texto confirmado entra no desfazer, e a borracha apaga encostando na caixa.
-
-Ainda não dá para andar com as setas dentro do texto nem editar um texto já confirmado.
+- Para corrigir um texto já confirmado, clique nele com a ferramenta Texto: a caixa abre de novo com o cursor no fim, no mesmo lugar e tamanho. A cor da barra passa a ser a do texto. Desfazer a correção leva dois `Ctrl+Z`: um tira o texto novo, o outro devolve o antigo.
 
 ## Fade: o traço some sozinho
 
@@ -47,12 +48,14 @@ As guias aparecem no monitor onde está o cursor, continuam visíveis no modo mo
 
 ## Holofote
 
-Tecla `S`. Escurece o monitor, menos um círculo em volta do cursor, que segue o mouse de um monitor para outro. A roda do mouse muda o tamanho do círculo. Dá para desenhar dentro dele, e ele aparece no compartilhamento de tela. `S` de novo ou `Esc` sai.
+Tecla `S`, ou `Ctrl+Alt+H` em qualquer programa. Escurece o monitor, menos um círculo em volta do cursor, que segue o mouse de um monitor para outro. A roda do mouse muda o tamanho do círculo. Dá para desenhar dentro dele, e ele aparece no compartilhamento de tela. `S` de novo ou `Esc` sai.
 
 ## Zoom
 
-Tecla `Z`. Uma lupa de 2x em volta do cursor, com 1/4 do tamanho do monitor. A roda vai de 1,5x a 4x. `Z` de novo ou `Esc` sai.
+Tecla `Z`, ou `Ctrl+Alt+Z` em qualquer programa. Uma lupa de 2x em volta do cursor, com 1/4 do tamanho do monitor. A roda vai de 1,5x a 4x. `Z` de novo ou `Esc` sai.
 
-A lupa mostra os desenhos, mas não entra no print, na gravação nem no compartilhamento de tela: só você a vê. Com a lupa aberta, clicar não desenha.
+A lupa mostra os desenhos, mas não entra no print, na gravação nem no compartilhamento de tela: só você a vê.
 
-O holofote e o zoom ligam o modo desenho sozinhos quando você usa os botões da barra.
+**Congelar para desenhar:** com a lupa aberta, um clique congela a área ampliada no monitor inteiro, como o ZoomIt. Aí dá para riscar em cima do detalhe com qualquer ferramenta, e a imagem congelada aparece no compartilhamento, no print e na gravação. `Z` ou `Esc` sai, e os riscos feitos no zoom somem junto. Os desenhos de antes voltam como estavam, com o desfazer de antes.
+
+O holofote e o zoom ligam o modo desenho sozinhos quando você usa os botões da barra ou os atalhos `Ctrl+Alt+H` e `Ctrl+Alt+Z`.

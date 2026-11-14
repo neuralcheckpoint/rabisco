@@ -132,11 +132,14 @@ impl Memo {
 }
 
 /// Cobertura (0-255) do texto numa caixa w x h.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TextMask {
     pub w: i32,
     pub h: i32,
     pub cov: Vec<u8>,
+    /// O texto e o tamanho da fonte, para abrir a caixa de novo e editar.
+    pub src: String,
+    pub px: i32,
 }
 
 impl Stroke {
@@ -157,9 +160,10 @@ impl Stroke {
             Tool::Pen | Tool::Marker | Tool::Eraser => {
                 if p.len() == 1 {
                     out.push((p[0], p[0]));
-                }
-                for w in p.windows(2) {
-                    out.push((w[0], w[1]));
+                } else {
+                    for k in 0..p.len() {
+                        freehand_piece(p, k, out);
+                    }
                 }
             }
             Tool::Line => out.push((p[0], p[p.len() - 1])),
@@ -190,7 +194,14 @@ impl Stroke {
         if !near || self.text.is_some() {
             return near;
         }
-        self.segments(scratch);
+        // shortcut: à mão testa a linha dos pontos crus, não a curva (no máximo ~1/4 de um canto de diferença); a curva custava 116 µs com 999 traços.
+        let raw = self.tool.is_freehand() && self.pts.len() > 1;
+        if raw {
+            scratch.clear();
+            scratch.extend(self.pts.windows(2).map(|w| (w[0], w[1])));
+        } else {
+            self.segments(scratch);
+        }
         scratch.iter().any(|(a, b)| {
             let (t, d) = seg_dist(a, b, x, y);
             d < a[2] + (b[2] - a[2]) * t + r
@@ -265,6 +276,33 @@ const GLYPHS: [&[&[(f32, f32)]]; 10] = [
 ];
 
 /// Círculo + dígitos do número, como cápsulas.
+/// Peça `k` do traço à mão (precisa de 2 pontos ou mais): reta do primeiro
+/// ponto até o meio do primeiro trecho, curvas de um meio de trecho ao outro
+/// com o ponto do meio como controle, e reta do último meio até o último ponto.
+/// A peça k (fora a última) só usa os pontos k-1..=k+1: o traço ao vivo
+/// desenha cada uma assim que o ponto seguinte chega.
+pub fn freehand_piece(p: &[Pt], k: usize, out: &mut Vec<(Pt, Pt)>) {
+    let mid = |a: Pt, b: Pt| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5];
+    let n = p.len();
+    if k == 0 {
+        return out.push((p[0], mid(p[0], p[1])));
+    }
+    if k == n - 1 {
+        return out.push((mid(p[n - 2], p[n - 1]), p[n - 1]));
+    }
+    let (a, c, b) = (mid(p[k - 1], p[k]), p[k], mid(p[k], p[k + 1]));
+    let len = (c[0] - a[0]).hypot(c[1] - a[1]) + (b[0] - c[0]).hypot(b[1] - c[1]);
+    let steps = ((len / 4.0) as usize).clamp(1, 16);
+    let mut prev = a;
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let u = 1.0 - t;
+        let q: Pt = core::array::from_fn(|j| u * u * a[j] + 2.0 * u * t * c[j] + t * t * b[j]);
+        out.push((prev, q));
+        prev = q;
+    }
+}
+
 pub fn number_segments(cx: f32, cy: f32, r: f32, w: f32, num: u16, out: &mut Vec<(Pt, Pt)>) {
     ellipse(cx, cy, r, r, w, ((r * 1.5) as usize).clamp(24, 96), out);
     let digits: Vec<usize> = num.to_string().bytes().map(|b| (b - b'0') as usize).collect();
@@ -1055,6 +1093,33 @@ pub fn swap_floor(out: &mut [u32], from: u32, to: u32) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn traco_a_mao_vira_curva_e_ao_vivo_bate_com_o_final() {
+        // Zigue-zague com cantos de 90°.
+        let pts: Vec<Pt> = (0..8).map(|i| [i as f32 * 20.0, if i % 2 == 0 { 0.0 } else { 20.0 }, 3.0 + i as f32 * 0.1]).collect();
+        let s = Stroke { tool: Tool::Pen, rgb: 0, alpha: 255, pts: pts.clone(), num: 0, text: None, area: Default::default() };
+        let mut all = Vec::new();
+        s.segments(&mut all);
+        // Ao vivo: cada ponto novo desenha a peça de antes; soltar desenha a última.
+        let mut live = Vec::new();
+        for n in 2..=pts.len() {
+            freehand_piece(&pts[..n], n - 2, &mut live);
+        }
+        freehand_piece(&pts, pts.len() - 1, &mut live);
+        assert_eq!(all, live);
+        // Nenhuma quina: o ângulo entre um trecho e o próximo fica bem abaixo dos 90° dos pontos crus.
+        let dir = |(a, b): &(Pt, Pt)| (b[1] - a[1]).atan2(b[0] - a[0]);
+        let worst = all.windows(2).map(|w| (dir(&w[1]) - dir(&w[0])).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.5, "maior virada {worst} rad");
+        assert_eq!((all[0].0, all.last().unwrap().1), (pts[0], pts[7]), "começa e termina nos pontos de verdade");
+        // Um e dois pontos continuam um ponto e uma reta.
+        let mut one = Vec::new();
+        Stroke { pts: vec![pts[0]], ..s.clone() }.segments(&mut one);
+        assert_eq!(one, [(pts[0], pts[0])]);
+        Stroke { pts: pts[..2].to_vec(), ..s.clone() }.segments(&mut one);
+        assert_eq!(one.len(), 2);
+    }
+
     fn draw(c: &mut Canvas, out: &mut [u32], s: &Stroke) {
         let r = c.raster_stroke(out, s);
         c.compose(out, r, s.rgb, s.alpha);
@@ -1273,7 +1338,7 @@ mod tests {
     fn text_stroke(x: f32, y: f32, rgb: u32) -> Stroke {
         let (w, h) = (20, 10);
         let cov = (0..w * h).map(|i| if i % w == 0 { 128 } else { 255 }).collect();
-        Stroke { tool: Tool::Text, rgb, alpha: 255, pts: vec![[x, y, 0.0]], num: 0, text: Some(std::sync::Arc::new(TextMask { w, h, cov })), area: Default::default() }
+        Stroke { tool: Tool::Text, rgb, alpha: 255, pts: vec![[x, y, 0.0]], num: 0, text: Some(std::sync::Arc::new(TextMask { w, h, cov, ..Default::default() })), area: Default::default() }
     }
 
     #[test]

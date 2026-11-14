@@ -13,30 +13,44 @@ pub fn font_px(size: f32) -> i32 {
     (16.0 + size * 4.0).round().clamp(12.0, 400.0) as i32
 }
 
-/// Texto sendo digitado. O cursor fica sempre no fim.
+/// Texto sendo digitado, com o cursor em `caret` (byte, sempre num limite de letra).
 #[derive(Default)]
 pub struct Editor {
     pub text: String,
+    pub caret: usize,
     /// Metade alta de um par UTF-16 (emoji) esperando a outra.
     high: Option<u16>,
 }
 
-/// Marca que se junta à letra de antes (acento combinado): sai junto no Backspace.
+/// Marca que se junta à letra de antes (acento combinado): anda e sai junto com ela.
 fn combining(c: char) -> bool {
     matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F | 0xFE0F)
 }
 
+/// Teclas de mover o cursor na caixa.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Move {
+    Left,
+    Right,
+    Home,
+    End,
+    Up,
+    Down,
+}
+
 impl Editor {
+    /// Abre com um texto já pronto (editar um texto confirmado), cursor no fim.
+    pub fn with(text: &str) -> Editor {
+        Editor { text: text.into(), caret: text.len(), high: None }
+    }
+
     /// Uma unidade UTF-16 de WM_CHAR. Devolve true se o texto mudou.
     /// As teclas mortas do ABNT2 (´ ~ ^ `) chegam já compostas (á, ã, ê) pelo
     /// TranslateMessage; aqui só entra o caractere pronto.
     pub fn input(&mut self, u: u16) -> bool {
         match u {
             0x08 => self.backspace(),
-            0x0D => {
-                self.text.push('\n');
-                true
-            }
+            0x0D => self.insert("\n"),
             0xD800..=0xDBFF => {
                 self.high = Some(u);
                 false
@@ -44,10 +58,7 @@ impl Editor {
             0xDC00..=0xDFFF => {
                 let Some(h) = self.high.take() else { return false };
                 match char::decode_utf16([h, u]).next() {
-                    Some(Ok(c)) => {
-                        self.text.push(c);
-                        true
-                    }
+                    Some(Ok(c)) => self.insert(c.encode_utf8(&mut [0; 4])),
                     _ => false,
                 }
             }
@@ -56,27 +67,95 @@ impl Editor {
             _ => {
                 self.high = None;
                 match char::from_u32(u as u32) {
-                    Some(c) => {
-                        self.text.push(c);
-                        true
-                    }
+                    Some(c) => self.insert(c.encode_utf8(&mut [0; 4])),
                     None => false,
                 }
             }
         }
     }
 
-    /// Apaga o último caractere, com os acentos combinados que vêm depois dele.
-    pub fn backspace(&mut self) -> bool {
-        let mut changed = false;
-        while let Some(c) = self.text.pop() {
-            changed = true;
+    /// Põe `s` no cursor (colar: `\r\n` vira quebra, tab vira espaço, outros controles saem).
+    pub fn insert(&mut self, s: &str) -> bool {
+        let clean: String = s.replace("\r\n", "\n").replace('\r', "\n").chars().map(|c| if c == '\t' { ' ' } else { c }).filter(|&c| c == '\n' || !c.is_control()).collect();
+        self.text.insert_str(self.caret, &clean);
+        self.caret += clean.len();
+        !clean.is_empty()
+    }
+
+    /// Começo da letra antes de `i`, com os acentos combinados dela.
+    fn prev(&self, i: usize) -> usize {
+        let mut at = i;
+        for (b, c) in self.text[..i].char_indices().rev() {
+            at = b;
             if !combining(c) {
                 break;
             }
         }
+        at
+    }
+
+    /// Fim da letra que começa em `i`, com os acentos combinados que vêm depois.
+    fn next(&self, i: usize) -> usize {
+        let mut chars = self.text[i..].char_indices();
+        let Some((_, c)) = chars.next() else { return i };
+        let mut at = i + c.len_utf8();
+        for (b, c) in chars {
+            if !combining(c) {
+                break;
+            }
+            at = i + b + c.len_utf8();
+        }
+        at
+    }
+
+    /// Apaga a letra antes do cursor, com os acentos combinados dela.
+    pub fn backspace(&mut self) -> bool {
+        let p = self.prev(self.caret);
+        let changed = p < self.caret;
+        self.text.replace_range(p..self.caret, "");
+        self.caret = p;
         changed
     }
+
+    /// Delete: apaga a letra depois do cursor.
+    pub fn delete(&mut self) -> bool {
+        let n = self.next(self.caret);
+        self.text.replace_range(self.caret..n, "");
+        n > self.caret
+    }
+
+    /// Move o cursor; `lines` (do último desenho) serve para Home, End, cima e baixo.
+    /// Devolve true se ele andou.
+    pub fn move_caret(&mut self, m: Move, lines: &[Line]) -> bool {
+        let old = self.caret;
+        let li = line_of(lines, self.caret);
+        let line = lines.get(li).copied().unwrap_or(Line { start: 0, end: self.text.len(), w: 0 });
+        self.caret = match m {
+            Move::Left => self.prev(self.caret),
+            Move::Right => self.next(self.caret),
+            Move::Home => line.start,
+            Move::End => line.end,
+            Move::Up | Move::Down => {
+                let to = if m == Move::Up { li.checked_sub(1) } else { Some(li + 1).filter(|&j| j < lines.len()) };
+                match to.map(|j| lines[j]) {
+                    // Mesma quantidade de letras desde o começo da linha.
+                    Some(t) => {
+                        let n = self.text[line.start..self.caret.max(line.start)].chars().count();
+                        self.text[t.start..t.end].char_indices().nth(n).map_or(t.end, |(b, _)| t.start + b)
+                    }
+                    None if m == Move::Up => 0,
+                    None => self.text.len(),
+                }
+            }
+        };
+        self.high = None;
+        self.caret != old
+    }
+}
+
+/// Linha onde está o byte `i` (a última que começa antes dele).
+pub fn line_of(lines: &[Line], i: usize) -> usize {
+    lines.iter().rposition(|l| l.start <= i).unwrap_or(0)
 }
 
 /// Uma linha do texto: bytes [start, end) e largura em px.
@@ -167,7 +246,7 @@ pub struct Font {
 #[derive(Default)]
 pub struct Laid {
     text: String,
-    lines: Vec<Line>,
+    pub lines: Vec<Line>,
 }
 
 /// Texto rasterizado + onde fica o cursor (na tela, relativo ao canto da caixa).
@@ -250,8 +329,8 @@ impl Font {
     /// Quebra em `max_w` (largura total da caixa) e rasteriza.
     #[cfg(test)]
     pub fn render(&self, text: &str, max_w: i32) -> Rendered {
-        let mut mask = TextMask { w: 0, h: 0, cov: Vec::new() };
-        let (_, caret) = self.update(text, max_w, &mut Laid::default(), &mut mask);
+        let mut mask = TextMask::default();
+        let (_, caret) = self.update(text, text.len(), max_w, &mut Laid::default(), &mut mask);
         Rendered { mask, caret }
     }
 
@@ -259,11 +338,21 @@ impl Font {
     /// o GDI só redesenha da linha que mudou para baixo (desde uma acima: o
     /// acento e a perna do ç passam da linha). Devolve a primeira linha de
     /// pixels que mudou e o cursor.
-    pub fn update(&self, text: &str, max_w: i32, laid: &mut Laid, mask: &mut TextMask) -> (i32, (i32, i32)) {
+    pub fn update(&self, text: &str, at: usize, max_w: i32, laid: &mut Laid, mask: &mut TextMask) -> (i32, (i32, i32)) {
         let pad = pad(self.px);
         let cw = self.caret_w();
         let lines = wrap(text, (max_w - 2 * pad - cw).max(self.px), &mut |s, cum| self.widths(s, cum));
-        let ((w, h), caret) = text_box(&lines, self.line_h, pad, cw);
+        let ((w, h), mut caret) = text_box(&lines, self.line_h, pad, cw);
+        if at < text.len() {
+            // Cursor no meio: largura do começo da linha até ele.
+            let li = line_of(&lines, at);
+            let mut cum = Vec::new();
+            self.widths(&text[lines[li].start..at.max(lines[li].start)], &mut cum);
+            caret = (pad + cum.last().copied().unwrap_or(0), pad + li as i32 * self.line_h);
+        }
+        mask.src.clear();
+        mask.src.push_str(text);
+        mask.px = self.px;
         let same = |a: &Line, b: &Line| a.w == b.w && text[a.start..a.end] == laid.text[b.start..b.end];
         let k = lines.iter().zip(&laid.lines).take_while(|(a, b)| same(a, b)).count();
         let first = k.saturating_sub(1);
@@ -391,6 +480,46 @@ mod tests {
         assert_eq!(e.text, "");
     }
 
+    #[test]
+    fn setas_colar_e_apagar_no_meio() {
+        let lines = |t: &str| wrap(t, 1000, &mut ten);
+        let mut e = Editor::with("cafe\nbar");
+        assert_eq!(e.caret, 8);
+        assert!(e.move_caret(Move::Up, &lines(&e.text)));
+        assert_eq!(e.caret, 3); // 3 letras para dentro da linha de cima
+        e.move_caret(Move::Right, &lines(&e.text));
+        assert!(e.input(0x301)); // acento combinado depois do "e"
+        e.move_caret(Move::Home, &lines(&e.text));
+        assert_eq!(e.caret, 0);
+        e.move_caret(Move::End, &lines(&e.text));
+        assert_eq!(e.caret, "cafe\u{301}".len());
+        e.move_caret(Move::Left, &lines(&e.text));
+        assert_eq!(e.caret, 3, "a seta pula o e com o acento junto");
+        assert!(e.delete());
+        assert_eq!(e.text, "caf\nbar");
+        assert!(e.insert("é já\r\ncom\ttab\u{7}"));
+        assert_eq!(e.text, "café já\ncom tab\nbar");
+        assert!(e.backspace());
+        assert_eq!(e.text, "café já\ncom ta\nbar");
+        e.move_caret(Move::Down, &lines(&e.text));
+        assert_eq!(e.caret, e.text.len(), "linha de baixo mais curta: vai para o fim dela");
+        assert!(!e.move_caret(Move::Down, &lines(&e.text)));
+        assert!(!e.move_caret(Move::Right, &lines(&e.text)));
+    }
+
+    #[test]
+    fn cursor_no_meio_fica_depois_da_letra() {
+        let f = Font::new(32).expect("fonte");
+        let mut m = TextMask::default();
+        let (_, fim) = f.update("ab\ncd", 5, 2000, &mut Laid::default(), &mut m);
+        let (_, meio) = f.update("ab\ncd", 4, 2000, &mut Laid::default(), &mut m);
+        let (_, cima) = f.update("ab\ncd", 2, 2000, &mut Laid::default(), &mut m);
+        assert_eq!(meio.1, fim.1);
+        assert!(meio.0 < fim.0 && meio.0 > pad(32));
+        assert!(cima.1 < fim.1);
+        assert_eq!((m.src.as_str(), m.px), ("ab\ncd", 32), "o texto fica guardado para editar depois");
+    }
+
     /// Cada letra mede 10 px: largura do começo até cada byte.
     fn ten(s: &str, cum: &mut Vec<i32>) {
         cum.clear();
@@ -422,20 +551,20 @@ mod tests {
     fn texto_refeito_da_linha_que_mudou_igual_ao_inteiro() {
         let f = Font::new(32).expect("fonte");
         let mut laid = Laid::default();
-        let mut mask = TextMask { w: 0, h: 0, cov: Vec::new() };
+        let mut mask = TextMask::default();
         let mut t = String::new();
         let mut parcial = false;
         let passos: Vec<char> = "Ação na borda do céu, com cedilha ç e til ã\nÉ outra linha bem comprida que quebra".chars().collect();
         for (i, &c) in passos.iter().enumerate() {
             t.push(c);
-            let (from, caret) = f.update(&t, 400, &mut laid, &mut mask);
+            let (from, caret) = f.update(&t, t.len(), 400, &mut laid, &mut mask);
             let full = f.render(&t, 400);
             assert_eq!((mask.w, mask.h, caret), (full.mask.w, full.mask.h, full.caret), "passo {i}");
             assert!(mask.cov == full.mask.cov, "passo {i}: cobertura diferente");
             parcial |= from > 0;
             if i % 9 == 8 {
                 t.pop();
-                f.update(&t, 400, &mut laid, &mut mask);
+                f.update(&t, t.len(), 400, &mut laid, &mut mask);
                 assert!(mask.cov == f.render(&t, 400).mask.cov, "apagar no passo {i}");
             }
         }

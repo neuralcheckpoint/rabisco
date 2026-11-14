@@ -13,6 +13,8 @@
 | `Ctrl+Shift+A` | Print de uma área (arraste um retângulo) |
 | `Ctrl+Shift+F` | Começa / para a gravação de vídeo |
 | `Ctrl+Shift+B` | Barra transparente: liga / desliga |
+| `Ctrl+Alt+H` | Holofote: liga / desliga |
+| `Ctrl+Alt+Z` | Zoom: liga / desliga |
 | `Ctrl+Shift+Q` | Fecha o Rabisco |
 
 ## No modo desenho
@@ -26,7 +28,8 @@
 | `G` | Guias: terços → 16:9 com área segura → terços no 16:9 → desligado |
 | `F` | Fade (traço some sozinho): liga / desliga |
 | `S` | Holofote (`S` de novo ou `Esc` sai) |
-| `Z` | Zoom (`Z` de novo ou `Esc` sai) |
+| `Z` | Zoom (clique congela para desenhar em cima; `Z` de novo ou `Esc` sai) |
+| `W` / `K` | Quadro branco / quadro preto (a mesma tecla tira) |
 | `1` a `9` | Cores |
 | Roda do mouse, `+` `−` | Espessura (no holofote, o tamanho do círculo; no zoom, o aumento) |
 | `Shift` arrastando | Linha e seta em 45°, retângulo quadrado, elipse redonda |
@@ -41,7 +44,9 @@
 | Tecla | Faz |
 |---|---|
 | `Enter` | Nova linha |
-| `Backspace` | Apaga a última letra |
+| `Backspace` / `Delete` | Apaga a letra antes / depois do cursor |
+| Setas, `Home`, `End` | Andam com o cursor |
+| `Ctrl+V` | Cola texto |
 | `Esc` ou clicar fora | Confirma o texto |
 | Roda do mouse | Tamanho da letra |
 
@@ -53,7 +58,7 @@
 
 ## Mudar os atalhos
 
-Os oito atalhos de "Em qualquer programa" podem ser trocados. As teclas do modo desenho são fixas.
+Os dez atalhos de "Em qualquer programa" podem ser trocados. As teclas do modo desenho são fixas.
 
 1. Botão direito no ícone da bandeja → **Editar atalhos…**
 2. Abre a janela **Atalhos do Rabisco**, com um campo por ação. Clique no campo e aperte o atalho novo. `Backspace` deixa a ação sem atalho, e **Padrões** volta todos ao original.

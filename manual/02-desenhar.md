@@ -16,7 +16,7 @@
 | Marcador | `N` | Círculo numerado 1, 2, 3… ([Apresentar](03-apresentar.md#marcadores-numerados)) |
 | Texto | `T` | Clique e digite ([Apresentar](03-apresentar.md#texto)) |
 
-As teclas só valem no modo desenho. Segure **Shift** enquanto arrasta para travar a linha e a seta em 45° ou deixar o retângulo quadrado e a elipse redonda.
+As teclas só valem no modo desenho. O traço à mão sai em curva suave, sem quinas entre um ponto e outro. Segure **Shift** enquanto arrasta para travar a linha e a seta em 45° ou deixar o retângulo quadrado e a elipse redonda.
 
 ## Cores e espessura
 
@@ -39,6 +39,10 @@ O cursor vira um círculo do tamanho e da cor do traço, para você ver onde vai
 | Esconder / mostrar os desenhos | `H` | `Ctrl+Shift+H` |
 
 "Apagar tudo" também dá para desfazer. Esconder não apaga nada: os desenhos voltam iguais.
+
+## Quadro branco e quadro preto
+
+No modo desenho, `W` cobre a tela com um fundo branco e `K` com um fundo preto, como uma lousa: dá para explicar algo do zero sem nada aberto atrás. A mesma tecla tira o fundo, e a outra troca a cor. Os desenhos continuam, e o quadro entra no print e na gravação. Ele cobre todos os monitores. No modo mouse ele sai da frente, e volta quando você liga o desenho de novo.
 
 ## Vários monitores
 

@@ -14,7 +14,7 @@ use windows_sys::Win32::UI::HiDpi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-const NAMES: [&str; 8] = ["Desenhar", "Esconder desenhos", "Apagar tudo", "Salvar print", "Print de uma área", "Gravar vídeo", "Barra transparente", "Sair"];
+const NAMES: [&str; atalhos::N] = ["Desenhar", "Esconder desenhos", "Apagar tudo", "Salvar print", "Print de uma área", "Gravar vídeo", "Barra transparente", "Holofote", "Zoom", "Sair"];
 const ID_FIELD: i32 = 100;
 const ID_DEFAULTS: i32 = 300;
 
@@ -24,7 +24,7 @@ static mut OWNER: HWND = null_mut();
 static mut FONT: HFONT = null_mut();
 /// Atalho de cada linha ao abrir e o valor que o campo mostrou para ele: se o
 /// campo não mudou, fica o original (o campo não sabe mostrar o Win).
-static mut START: [(Option<Key>, usize); 8] = [(None, 0); 8];
+static mut START: [(Option<Key>, usize); atalhos::N] = [(None, 0); atalhos::N];
 
 /// A janela, se aberta (o laço de mensagens passa as teclas por ela).
 pub fn hwnd() -> HWND {
@@ -55,7 +55,7 @@ pub fn open(owner: HWND, icon: HICON) {
         let dpi = cursor_dpi();
         let px = |v: i32| v * dpi as i32 / 96;
         let (style, ex) = (WS_CAPTION | WS_SYSMENU, WS_EX_CONTROLPARENT);
-        let mut r = RECT { left: 0, top: 0, right: px(380), bottom: px(354) };
+        let mut r = RECT { left: 0, top: 0, right: px(380), bottom: px(418) };
         AdjustWindowRectExForDpi(&mut r, style, 0, ex, dpi);
         let (w, h) = (r.right - r.left, r.bottom - r.top);
         let (mx, my, mw, mh) = cursor_monitor();
@@ -84,9 +84,9 @@ pub fn open(owner: HWND, icon: HICON) {
             let f = add("msctls_hotkey32", "", WS_TABSTOP, WS_EX_CLIENTEDGE, ID_FIELD + i as i32, (170, y, 194, 24));
             START[i] = (keys[i], set_field(f, keys[i]));
         }
-        add("BUTTON", "Padrões", WS_TABSTOP, 0, ID_DEFAULTS, (16, 314, 90, 28));
-        add("BUTTON", "Cancelar", WS_TABSTOP, 0, IDCANCEL, (182, 314, 88, 28));
-        add("BUTTON", "Salvar", WS_TABSTOP | BS_DEFPUSHBUTTON as u32, 0, IDOK, (276, 314, 88, 28));
+        add("BUTTON", "Padrões", WS_TABSTOP, 0, ID_DEFAULTS, (16, 378, 90, 28));
+        add("BUTTON", "Cancelar", WS_TABSTOP, 0, IDCANCEL, (182, 378, 88, 28));
+        add("BUTTON", "Salvar", WS_TABSTOP | BS_DEFPUSHBUTTON as u32, 0, IDOK, (276, 378, 88, 28));
 
         ShowWindow(WIN, SW_SHOW);
         SetForegroundWindow(WIN);
@@ -121,7 +121,7 @@ unsafe fn read_field(i: usize) -> Option<Key> {
 
 /// Confere e grava; false mantém a janela aberta.
 unsafe fn save() -> bool {
-    let keys: [Option<Key>; 8] = core::array::from_fn(|i| unsafe { read_field(i) });
+    let keys: [Option<Key>; atalhos::N] = core::array::from_fn(|i| unsafe { read_field(i) });
     let mut problems = Vec::new();
     for (i, k) in keys.iter().enumerate() {
         let Some(k) = *k else { continue };

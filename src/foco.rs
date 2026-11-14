@@ -99,6 +99,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn zoom_congelado_pega_o_monitor_dividido_pelo_zoom() {
+        let mon = (2560, 0, 1920, 1080);
+        // No meio: área de 1/2 do monitor centrada no clique.
+        assert_eq!(zoom_src(3520, 540, 1920, 1080, 2.0, mon), (3040, 270, 960, 540));
+        // No canto: encosta na borda do monitor, sem pegar o vizinho.
+        assert_eq!(zoom_src(2570, 5, 1920, 1080, 2.0, mon), (2560, 0, 960, 540));
+    }
+
+    #[test]
     fn furo_claro_no_meio_e_escuro_fora() {
         let (d, px) = hole(50.0);
         let at = |x: i32, y: i32| px[(y * d + x) as usize];

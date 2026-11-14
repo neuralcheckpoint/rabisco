@@ -140,9 +140,10 @@ pub fn hit(l: &Layout, x: i32, y: i32) -> Option<Item> {
 }
 
 /// `keys`: texto dos atalhos globais, na ordem de `atalhos::ACTIONS` ("" = desligado).
-pub fn label(item: Item, keys: &[String; 8]) -> String {
-    use crate::atalhos::{HIDE, QUIT, REC, SAVE};
+pub fn label(item: Item, keys: &[String; crate::atalhos::N]) -> String {
+    use crate::atalhos::{HIDE, QUIT, REC, SAVE, SPOT, ZOOM};
     let k = |i: usize| if keys[i].is_empty() { String::new() } else { format!(" ({})", keys[i]) };
+    let g = |i: usize| if keys[i].is_empty() { String::new() } else { format!(", ou {} em qualquer programa", keys[i]) };
     match item {
         Item::Grip => "Arraste para mover · Ctrl+roda do mouse muda o tamanho da barra".into(),
         Item::Close => format!("Guardar na bandeja · sair pelo ícone da bandeja{}", k(QUIT)),
@@ -156,7 +157,7 @@ pub fn label(item: Item, keys: &[String; 8]) -> String {
             Tool::Rect => "Retângulo (R) · Shift deixa quadrado",
             Tool::Ellipse => "Elipse (O) · Shift deixa círculo",
             Tool::Number => "Marcador numerado (N): cada clique põe 1, 2, 3… na cor atual",
-            Tool::Text => "Texto (T): clique e digite · Enter quebra a linha · Esc ou clicar fora confirma",
+            Tool::Text => "Texto (T): clique e digite · Enter quebra a linha · setas e Ctrl+V · clique num texto pronto para editar · Esc ou clicar fora confirma",
         }
         .into(),
         Item::Color(i) => format!("{} ({})", COLOR_NAMES[i], i + 1),
@@ -176,8 +177,8 @@ pub fn label(item: Item, keys: &[String; 8]) -> String {
         },
         Item::Rec => format!("Gravar vídeo{}: o menu escolhe monitor, janela ou região e o som · gravando, para", k(REC)),
         Item::Fade => "Fade (F): os traços novos somem sozinhos 3 s depois".into(),
-        Item::Spot => "Holofote (S): escurece a tela menos em volta do cursor · roda muda o tamanho · Esc sai".into(),
-        Item::Zoom => "Zoom (Z): lupa em volta do cursor · roda de 1,5x a 4x · Esc sai".into(),
+        Item::Spot => format!("Holofote (S{}): escurece a tela menos em volta do cursor · roda muda o tamanho · Esc sai", g(SPOT)),
+        Item::Zoom => format!("Zoom (Z{}): lupa em volta do cursor · roda de 1,5x a 4x · clique congela para desenhar em cima · Esc sai", g(ZOOM)),
     }
 }
 

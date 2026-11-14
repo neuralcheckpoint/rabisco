@@ -4,8 +4,11 @@
 
 use std::path::PathBuf;
 
+/// Quantas ações têm atalho.
+pub const N: usize = 10;
+
 /// Ordem fixa: o índice é a ação (o `main` liga cada índice ao id do RegisterHotKey).
-pub const ACTIONS: [(&str, &str, &str); 8] = [
+pub const ACTIONS: [(&str, &str, &str); N] = [
     ("desenhar", "Ctrl+Shift+D", "liga / desliga o modo desenho"),
     ("esconder", "Ctrl+Shift+H", "esconde / mostra os desenhos"),
     ("apagar", "Ctrl+Shift+X", "apaga tudo"),
@@ -13,6 +16,9 @@ pub const ACTIONS: [(&str, &str, &str); 8] = [
     ("print_area", "Ctrl+Shift+A", "print de uma área"),
     ("gravar", "Ctrl+Shift+F", "começa / para a gravação"),
     ("barra", "Ctrl+Shift+B", "barra transparente (guardada: mostra a barra)"),
+    // Ctrl+Alt: AltGr+H e AltGr+Z não escrevem nada no ABNT2.
+    ("holofote", "Ctrl+Alt+H", "liga / desliga o holofote"),
+    ("zoom", "Ctrl+Alt+Z", "liga / desliga o zoom"),
     ("sair", "Ctrl+Shift+Q", "fecha o Rabisco"),
 ];
 pub const DRAW: usize = 0;
@@ -22,7 +28,9 @@ pub const SAVE: usize = 3;
 pub const PRINT_REG: usize = 4;
 pub const REC: usize = 5;
 pub const BAR: usize = 6;
-pub const QUIT: usize = 7;
+pub const SPOT: usize = 7;
+pub const ZOOM: usize = 8;
+pub const QUIT: usize = 9;
 
 // Mesmos valores de MOD_ALT/CONTROL/SHIFT/WIN do RegisterHotKey.
 const MODS: [(&str, u32); 4] = [("Ctrl", 2), ("Shift", 4), ("Alt", 1), ("Win", 8)];
@@ -34,7 +42,7 @@ pub struct Key {
 }
 
 pub struct Atalhos {
-    pub keys: [Option<Key>; 8],
+    pub keys: [Option<Key>; N],
     /// Linhas que não deu para usar (vão no aviso ao abrir).
     pub bad: Vec<String>,
 }
@@ -49,13 +57,13 @@ pub fn load() -> Atalhos {
 }
 
 /// Grava os atalhos (a janela "Editar atalhos" chama ao salvar).
-pub fn save(keys: &[Option<Key>; 8]) -> std::io::Result<()> {
+pub fn save(keys: &[Option<Key>; N]) -> std::io::Result<()> {
     let p = path();
     std::fs::create_dir_all(p.parent().unwrap())?;
     std::fs::write(&p, file_text(keys))
 }
 
-fn file_text(keys: &[Option<Key>; 8]) -> String {
+fn file_text(keys: &[Option<Key>; N]) -> String {
     let mut s = String::from(
         "# Atalhos do Rabisco, valem em qualquer programa. O jeito fácil de mudar: bandeja > Editar atalhos.\r\n\
          # Teclas: Ctrl, Shift, Alt e Win + uma letra, um número ou F1 a F24 (ex.: Ctrl+Alt+D, F9).\r\n\
@@ -148,6 +156,10 @@ mod tests {
         for (i, (_, def, _)) in ACTIONS.iter().enumerate() {
             assert_eq!(label(a.keys[i]), *def);
         }
+        // Arquivo de antes do holofote e do zoom: eles entram com o padrão.
+        let b = parse("desenhar = F8
+zoom = F9");
+        assert_eq!((b.keys[DRAW], b.keys[ZOOM], label(b.keys[SPOT])), (parse_key("F8"), parse_key("F9"), "Ctrl+Alt+H".into()));
     }
 
     #[test]

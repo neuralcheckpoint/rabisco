@@ -311,8 +311,13 @@ fn target(mode: Mode) -> Result<Target> {
                 Ok((interop.CreateForMonitor(HMONITOR(m))?, Some(r), (mon.0 + r.0, mon.1 + r.1, r.2, r.3)))
             }
             Mode::Window(hwnd) => {
-                let mut r = core::mem::zeroed();
-                GetWindowRect(hwnd as _, &mut r);
+                // Contorno visível (DWM): o GetWindowRect inclui a borda invisível de ~7 px
+                // e a moldura vermelha saía deslocada da imagem gravada.
+                let mut r: windows_sys::Win32::Foundation::RECT = core::mem::zeroed();
+                let dwm = windows_sys::Win32::Graphics::Dwm::DwmGetWindowAttribute(hwnd as _, windows_sys::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS as u32, &mut r as *mut _ as _, size_of_val(&r) as u32);
+                if dwm != 0 {
+                    GetWindowRect(hwnd as _, &mut r);
+                }
                 let area = (r.left, r.top, r.right - r.left, r.bottom - r.top);
                 Ok((interop.CreateForWindow(HWND(hwnd as _))?, None, area))
             }
