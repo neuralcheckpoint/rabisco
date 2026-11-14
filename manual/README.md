@@ -18,7 +18,7 @@ O Rabisco desenha por cima de qualquer coisa na tela do Windows: um vídeo, um p
 
 ## Em 30 segundos
 
-1. [Baixe o instalador](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Instalar-Rabisco.exe) e dê dois cliques.
+1. [Baixe o Rabisco.zip](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Rabisco.zip), extraia e dê dois cliques no `Instalar-Rabisco.exe`.
 2. A barra aparece na esquerda da tela. Clique no lápis e desenhe.
 3. `Esc` volta ao mouse: os desenhos ficam na tela e o clique passa para o programa de baixo.
 4. `Ctrl+Shift+X` apaga tudo. `Ctrl+Shift+S` tira um print com os desenhos.

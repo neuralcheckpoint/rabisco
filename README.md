@@ -6,11 +6,11 @@ Anote por cima de qualquer coisa na tela do Windows: um vídeo, um programa, uma
 
 ## ⬇️ Baixar
 
-### [**Baixar o instalador (Instalar-Rabisco.exe)**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Instalar-Rabisco.exe)
+### [**Baixar o Rabisco (Rabisco.zip)**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Rabisco.zip)
 
-Dê dois cliques e pronto: o Rabisco é instalado só para o seu usuário (não pede administrador), ganha um atalho no menu Iniciar e passa a abrir junto com o Windows, guardado na bandeja. Funciona no Windows 10 e 11.
+Extraia o zip e dê dois cliques no `Instalar-Rabisco.exe`, e pronto: o Rabisco é instalado só para o seu usuário (não pede administrador), ganha um atalho no menu Iniciar e passa a abrir junto com o Windows, guardado na bandeja. Funciona no Windows 10 e 11.
 
-Prefere sem instalar? [**Baixar rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/rabisco.exe) (versão portátil, ~550 KB).
+Prefere sem instalar? Use o `rabisco.exe` do mesmo zip (versão portátil, ~580 KB).
 
 > **O Windows pode mostrar "O Windows protegeu o computador".** Isso aparece com qualquer programa novo sem assinatura digital paga. Clique em **Mais informações → Executar assim mesmo**.
 

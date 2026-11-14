@@ -4,10 +4,12 @@
 
 ## Baixar
 
-- [**Instalar-Rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Instalar-Rabisco.exe): o instalador. É o caminho normal.
-- [**rabisco.exe**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/rabisco.exe): a versão portátil, que roda sem instalar (num pendrive, por exemplo).
+[**Rabisco.zip**](https://github.com/neuralcheckpoint/rabisco/releases/latest/download/Rabisco.zip). Extraia o zip (botão direito → **Extrair tudo**). Dentro dele vêm dois arquivos:
 
-Os dois são o mesmo programa, de ~550 KB. Funcionam no Windows 10 e 11.
+- `Instalar-Rabisco.exe`: o instalador. É o caminho normal.
+- `rabisco.exe`: a versão portátil, que roda sem instalar (num pendrive, por exemplo).
+
+Os dois são o mesmo programa, de ~580 KB. Funcionam no Windows 10 e 11.
 
 ## Instalar
 
